@@ -84,6 +84,8 @@ static void benchmark_parse_control(uint8_t data[]){
 		// motes at once.
 		stick = (uint32_t) OSGetTickCount();
 #endif
+		packet_clear_buffer_down();
+
 //#if (UNET_DEVICE_TYPE == ROUTER)
 //		OSDelayTask(10); // Wait some time to server startup
 //#endif
