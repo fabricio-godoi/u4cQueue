@@ -75,6 +75,8 @@ static void benchmark_parse_control(uint8_t data[]){
 	BM_PRINTF("benchmark: Command 0x%02X received!\n",bm_ctrl.ctrl);
 	if(bm_ctrl.c.start) {
 		bm_en_comm = TRUE;
+		// Clear the buffer if there was something from another run
+		packet_clear_buffer_down();
 #if (BM_CHK_TXRX_TIME_EN == TRUE)
 		// Synchronization method between all nodes,
 		// can only be accomplished by the simulator,
@@ -144,6 +146,9 @@ void unet_benchmark(void){
 
 	// Packet that will be received
 	Benchmark_Packet_Type bm_packet = { 0, 0, "\0" };
+	uint16_t message_table[128];
+	uint8_t i;
+	for(i=0;i<128;i++) message_table[i] = 0;
 #if (BM_CHK_TXRX_TIME_EN == TRUE)
 	uint32_t tick;
 #endif
@@ -175,7 +180,6 @@ void unet_benchmark(void){
 	 *  Observer (simulator) will wait for every node to set the parent,
 	 *  when it's all setup, the observer will start every mote individually.
 	 */
-	uint16_t i;
 	for(;;)
 	{
 		// Network or Serial reception
@@ -186,7 +190,10 @@ void unet_benchmark(void){
 //				bm_ctrl.ctrl = data[0];
 				benchmark_parse_control(data);
 				if(bm_ctrl.c.reset){
-					for(i=0;i<=bm_num_of_nodes;i++) bm_pkts_recv[i] = 0;
+					for(i=0;i<=bm_num_of_nodes;i++){
+						bm_pkts_recv[i] = 0;
+						message_table[i] = 0;
+					}
 				}
 			}
 
@@ -196,7 +203,10 @@ void unet_benchmark(void){
 				tick = (uint32_t) OSGetTickCount() - stick;
 #endif
 				// Make a individual count for each client
-				bm_pkts_recv[client.sender_address.u8[7]]++;
+				if(bm_packet.msg_number > message_table[client.sender_address.u8[7]]){
+					message_table[client.sender_address.u8[7]] = bm_packet.msg_number;
+					bm_pkts_recv[client.sender_address.u8[7]]++;
+				}
 				NODESTAT_UPDATE(apprxed);
 
 #if (BM_CHK_TXRX_TIME_EN == TRUE)
