@@ -15,10 +15,8 @@
 #define DEBUG_PRINTF						1
 #define NEIGHBOURHOOD_SIZE   				(8)
 #define UNET_RADIO 							cc2520_driver
-/**
- * Define de radio endianness, this is critical to ieee 802.15.4 Frame Control
- */
-#define RADIO_AUTOCRC						TRUE
+
+#define RADIO_AUTOCRC						TRUE  // If radio automatically give the CRC bit
 #define UNET_DEFAULT_STACKSIZE  			512 		// Default value 448 bytes
 
 #define print_addr64(addr) PRINTF("%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x\n\r", ((uint8_t *)addr)[0], ((uint8_t *)addr)[1], ((uint8_t *)addr)[2], ((uint8_t *)addr)[3], ((uint8_t *)addr)[4], ((uint8_t *)addr)[5], ((uint8_t *)addr)[6], ((uint8_t *)addr)[7])
@@ -26,6 +24,14 @@
 #define MAX_SEQUENCES_NUM					128
 #define CONTIKI_MAC_ENABLE					0
 #define CONTIKI_MAC_WINDOW					125
+
+/**
+ * Configure uNet buffer size
+ * packet_t size if 142 bytes
+ *  default: using 16 pkts down and 1 pkt up- 2414 bytes
+ */
+#define UNET_UP_BUF_SIZE				1
+#define UNET_DOWN_BUF_SIZE 			16
 
 // Network device types
 #define   PAN_COORDINATOR                   0   // Server
@@ -42,9 +48,6 @@
 
 #define   ROUTER_TYPE                       ROUTER1
 
-
-
-/// TODO this ins't used at any code, why keep it?
 #define ROUTER_AUTO_ASSOCIATION				TRUE
 #if (ROUTER_AUTO_ASSOCIATION == TRUE)
 #if (ROUTER_TYPE == ROUTER1)

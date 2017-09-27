@@ -12,10 +12,12 @@
 #include "unet_router.h"
 #include "unet_api.h"
 
-packet_t packet_up;
+packet_t packet_up;//[UNET_UP_BUF_SIZE];
 packet_t packet_down;
-packet_t packet_multicast_up;
 
+
+/* Packet to advertise the route */
+static packet_t adv_packet;
 
 //#define DEBUG_ENABLED
 #ifdef DEBUG_ENABLED
@@ -23,7 +25,6 @@ packet_t packet_multicast_up;
 #else
 #define PRINTD(...)
 #endif
-
 
 struct
 {
@@ -79,6 +80,7 @@ const char* next_header_tostring[] =
 		"NEXT_HEADER_UNET_APP",
 		"NET_HEADER_RESERVED"
 };
+
 
 uint8_t next_header_toindex(uint8_t t)
 {
@@ -248,34 +250,34 @@ uint8_t unet_packet_up_sendto(addr64_t * dest_addr64, uint8_t payload_len)
 	return RESULT_DESTINATION_NULL;
 }
 /*--------------------------------------------------------------------------------------------*/
-uint8_t unet_router_down(void)
+uint8_t unet_router_down(packet_t *p)
 {
 	uint8_t p_idx;
 	uint16_t next_hop_addr16;
 
-	if(packet_down.packet[UNET_HOP_LIMIT] == 0) return FALSE;
-	packet_down.packet[UNET_HOP_LIMIT]--;
+	if(p->packet[UNET_HOP_LIMIT] == 0) return FALSE;
+	p->packet[UNET_HOP_LIMIT]--;
 
     p_idx = node_data_get(NODE_PARENTINDEX);
     if (p_idx == NO_PARENT) return FALSE;
 
-    packet_info_set(&packet_down, PKTINFO_SEQNUM, node_seq_num_get_next());
+    packet_info_set(p, PKTINFO_SEQNUM, node_seq_num_get_next());
 
     //packet_info_set(&packet_down, PKTINFO_LAST_SEQNUM, packet_down.info[PKTINFO_SEQNUM]);
 
-    packet_down.state = PACKET_IN_ROUTE;
+    p->state = PACKET_IN_ROUTE;
 
     /* set next hop */
     next_hop_addr16 = link_neighbor_table_addr16_get(p_idx);
-    ieee802154_dest16_set(&packet_down, next_hop_addr16);
-    ieee802154_header_set(&packet_down, DATA_FRAME, ACK_REQ_TRUE);
+    ieee802154_dest16_set(p, next_hop_addr16);
+    ieee802154_header_set(p, DATA_FRAME, ACK_REQ_TRUE);
 
     //packet_down.state = PACKET_WAITING_TX;
 
     return TRUE;
 }
 /*--------------------------------------------------------------------------------------------*/
-void unet_update_packet_down_dest(void){
+void unet_update_packet_down_dest(packet_t *p){
 	uint8_t p_idx;
 	uint16_t next_hop_addr16;
     p_idx = node_data_get(NODE_PARENTINDEX);
@@ -283,14 +285,14 @@ void unet_update_packet_down_dest(void){
 
     /* set next hop */
     next_hop_addr16 = link_neighbor_table_addr16_get(p_idx);
-    ieee802154_dest16_set(&packet_down, next_hop_addr16);
-    packet_down.packet[MAC_DEST_16] = packet_info_get(&packet_down,PKTINFO_DEST16L);
-    packet_down.packet[MAC_DEST_16+1] = packet_info_get(&packet_down,PKTINFO_DEST16H);
+    ieee802154_dest16_set(p, next_hop_addr16);
+    p->packet[MAC_DEST_16] = packet_info_get(p,PKTINFO_DEST16L);
+    p->packet[MAC_DEST_16+1] = packet_info_get(p,PKTINFO_DEST16H);
 }
 /*--------------------------------------------------------------------------------------------*/
-uint8_t unet_packet_down_send(uint8_t payload_len)
+uint8_t unet_packet_down_send(packet_t *p, uint8_t payload_len)
 {
-	extern packet_t packet_down;
+//	packet_t *p;
 
 	uint8_t hop_limit = node_data_get(NODE_DISTANCE);
 
@@ -300,7 +302,7 @@ uint8_t unet_packet_down_send(uint8_t payload_len)
 	hop_limit = 0xFF; /* set max hops */
 
 	/* add network header */
-	unet_header_set(&packet_down,
+	unet_header_set(p,
 			UNICAST_DOWN,
 			hop_limit,
 			NEXT_HEADER_UNET_APP,
@@ -309,61 +311,71 @@ uint8_t unet_packet_down_send(uint8_t payload_len)
 			payload_len
 	);
 
-    packet_info_set(&packet_down, PKTINFO_SIZE,
+    packet_info_set(p, PKTINFO_SIZE,
     		payload_len + UNET_NWK_HEADER_SIZE + UNET_LLC_HEADER_SIZE + UNET_MAC_HEADER_SIZE);
 
-    /// Essa fun��o deve retornar o estado tb
-    if (unet_router_down() == TRUE)
+    /// Essa funçãoo deve retornar o estado tb
+    if (unet_router_down(p) == TRUE)
     {
-    	NODESTAT_UPDATE(netapptx);
-    	// Por enquanto retornando ok
-    	return RESULT_PACKET_SEND_OK;
+    	// Put the packet in the buffer
+    	if(add_packet_down(p) == WRITE_BUFFER_OK){
+        	NODESTAT_UPDATE(netapptx);
+        	// Por enquanto retornando ok
+        	return RESULT_PACKET_SEND_OK;
+    	}
+    	else{
+    		return RESULT_BUFFER_FULL;
+    	}
     }else{
     	return RESULT_DESTINATION_UNREACHABLE;
     }
 }
 /*--------------------------------------------------------------------------------------------*/
-uint8_t unet_router_adv(void)
-{
-	extern packet_t packet_down;
-	uint8_t payload_len = 0;
-
-	uint8_t hop_limit = node_data_get(NODE_DISTANCE);
-
-//	PRINTF("debug: router_adv\n");
-
-	if(hop_limit >= ROUTE_TO_BASESTATION_LOST) return RESULT_DESTINATION_UNREACHABLE;
-//	PRINTF("debug: reachable\n");
-
-	hop_limit = 0xFF; /* set max hops */
-
-	if(packet_acquire_down() == PACKET_ACCESS_DENIED) return RESULT_DESTINATION_UNREACHABLE;
-//	PRINTF("debug: access granted\n");
+void unet_adv_packet_create(void){
 
 	/* create router adv packet */
-	memset(&packet_down.packet, 0, sizeof(packet_down.packet));
+	memset(&adv_packet.packet, 0, sizeof(adv_packet.packet));
 
-	payload_len = 1;
-
-	packet_down.packet[UNET_CTRL_MSG_PACKET_TYPE] = ROUTER_ADV;
+	//	packet_down.packet[UNET_CTRL_MSG_PACKET_TYPE] = ROUTER_ADV;
+	adv_packet.packet[UNET_CTRL_MSG_PACKET_TYPE] = ROUTER_ADV;
 
 	/* add network header */
-	unet_header_set(&packet_down,
+	unet_header_set(&adv_packet,
 			UNICAST_DOWN,
-			hop_limit,
+			0xFF, /* max hops */
 			NEXT_HEADER_UNET_CTRL_MSG,
 			node_addr64_get(),
 			node_pan_id64_get(),
-			payload_len
+			1 /* payload length */
 	);
 
-    packet_info_set(&packet_down, PKTINFO_SIZE,
-    		payload_len + UNET_NWK_HEADER_SIZE + UNET_LLC_HEADER_SIZE + UNET_MAC_HEADER_SIZE);
+	packet_info_set(&adv_packet, PKTINFO_SIZE,
+			1 + UNET_NWK_HEADER_SIZE + UNET_LLC_HEADER_SIZE + UNET_MAC_HEADER_SIZE);
 
-    unet_router_down();
+}
 
-    return RESULT_PACKET_SEND_OK;
+/*--------------------------------------------------------------------------------------------*/
+uint8_t unet_router_adv(void)
+{
+	uint8_t hop_limit = node_data_get(NODE_DISTANCE);
+	if(hop_limit >= ROUTE_TO_BASESTATION_LOST) return RESULT_DESTINATION_UNREACHABLE;
 
+//	if(packet_acquire_down() == PACKET_ACCESS_DENIED) return RESULT_DESTINATION_UNREACHABLE;
+	if(is_buffer_down_full()) return RESULT_DESTINATION_UNREACHABLE;
+
+	// Get the packet route
+	if (unet_router_down(&adv_packet) == TRUE)
+	{
+		// Put the packet in the buffer
+		if(add_packet_down(&adv_packet) == WRITE_BUFFER_OK){
+			return RESULT_PACKET_SEND_OK;
+		}
+		else{
+			return RESULT_BUFFER_FULL;
+		}
+	}else{
+		return RESULT_DESTINATION_UNREACHABLE;
+	}
 }
 /*--------------------------------------------------------------------------------------------*/
 //void RadioReset(void);
@@ -420,8 +432,6 @@ uint8_t unet_packet_output(packet_t *pkt, uint8_t tx_retries, uint16_t delay_ret
 					UNET_RADIO.get(RADIO_STATUS,&state);
 					PRINTF_MAC(1,"TX ISR Timeout. RADIO STATE: %u \r\n", state);
 
-					PRINTD("DEBUG: fatal error, radio stuck\n");
-
 					/* isso nunca deve acontecer, pois indica travamento do r�dio */
 	//				NODESTAT_UPDATE(radioresets);
 					extern void RadioReset(void);
@@ -433,6 +443,7 @@ uint8_t unet_packet_output(packet_t *pkt, uint8_t tx_retries, uint16_t delay_ret
 			// Some error occurred, just delay it to another try
 			DelayTask(delay_retry);
 		}
+		// TODO this souldn't enter unless all retries failed, which is not done yet
 		if(tx_retries == 0){
 			NODESTAT_UPDATE(txmaxretries);
 		}
@@ -520,12 +531,14 @@ uint8_t unet_packet_input(packet_t *p)
 			 * ROUTER_ADV? YES: store/update route -> post uNET "route DOWN" event
 			 * -> return ACK | NO: discards -> return NO_ACK -> end
 			 */
-			r=&packet_down; /* try to use output buffer */
+//			r=&packet_down; /* try to use output buffer */
 
 			/* todo: fazer uma fun��o apenas, passando o ponteiro do pacote e
 			 * o estado que vai estar em caso de sucesso no acesso ao buffer */
-			if(packet_acquire_down() == PACKET_ACCESS_DENIED)
+//			if(packet_acquire_down() == PACKET_ACCESS_DENIED)
+			if(is_buffer_down_full())
 			{
+//				printf("BUFFER FULL\n");
 				PRINTF_LINK(1,"BUFFER FULL! RX DROPPED! from: %u, SN: %u\r\n",
 						BYTESTOSHORT(p->info[PKTINFO_SRC16H],p->info[PKTINFO_SRC16L]), p->info[PKTINFO_SEQNUM]);
 
@@ -537,39 +550,52 @@ uint8_t unet_packet_input(packet_t *p)
 			}
 			else
 			{
-				ack_req = ACK_REQ_TRUE;
 
-				/* todo: este c�digo poder� ser colocado mais adiante, pois o resultado n�o � usado aqui
-				 * s� para debug.  */
-				if(p->info[PKTINFO_DUPLICATED] == TRUE)
-				{
-					PRINTF_LINK(1,"RX PACKET DUPLICATE! from %u, SN: %u\r\n",
-							BYTESTOSHORT(p->info[PKTINFO_SRC16H],p->info[PKTINFO_SRC16L]), p->info[PKTINFO_SEQNUM]);
-				}
+				// NOTE:  will be duplicated packets that will arrive
+				//        since not always the buffer should be free
+				// TODO:  so, instead check in 802154 check it after inserting in buffer
+				// Check if the packet is duplicated
+//				if(p->info[PKTINFO_DUPLICATED] == TRUE)
+//				{
+//					printf("DUP %d\n",p->info[PKTINFO_SEQNUM]);
+//					NODESTAT_UPDATE(dupnet);
+//					PRINTF_ROUTER(1,"DROP DUP PACKET, to %u SN %u \r\n",
+//										BYTESTOSHORT(p->info[PKTINFO_DEST16H],p->info[PKTINFO_DEST16L]),p->info[PKTINFO_SEQNUM]);
+//					// There is no need to continue, drop the packet
+//					break;
+//				}
 
 				/* it will be stored in buffer, change state to sending ack */
 				p->state = PACKET_SENDING_ACK;
 
-				memcpy(r,p,sizeof(packet_t));
+				// Put the packet in the buffer if there is memory available
+				if(add_packet_down(p) == NO_AVAILABLE_MEMORY){
+					printf("NO_AVAILABLE_MEMORY\n");
+					break;
+				}
+
+				// Packet in the buffer, so send the ACK
+				ack_req = ACK_REQ_TRUE;
+//				memcpy(r,p,sizeof(packet_t));
 
 				/* todo: move the code below to the router down task ? */
-				if(r->packet[UNET_NEXT_HEADER] == NEXT_HEADER_UNET_CTRL_MSG &&
-						r->packet[UNET_CTRL_MSG_PACKET_TYPE] == ROUTER_ADV)
+				if(p->packet[UNET_NEXT_HEADER] == NEXT_HEADER_UNET_CTRL_MSG &&
+						p->packet[UNET_CTRL_MSG_PACKET_TYPE] == ROUTER_ADV)
 				{
 					PRINTF_ROUTER(2,"RX ROUTE_ADV\r\n");
 				}
 
 
-				uint16_t src_addr16 = (r->info[PKTINFO_SRC16H] << 8) + r->info[PKTINFO_SRC16L];
+				uint16_t src_addr16 = (p->info[PKTINFO_SRC16H] << 8) + p->info[PKTINFO_SRC16L];
 
-				addr64_t * dest_addr64 = (addr64_t *) &(r->packet[UNET_SRC_64]);
+				addr64_t * dest_addr64 = (addr64_t *) &(p->packet[UNET_SRC_64]);
 				unet_router_up_table_entry_add(src_addr16, dest_addr64);
 
 				PRINTF_ROUTER(2,"Route added or updated\r\n");
 				PRINTF_ROUTER(1,"RX DOWN in buffer, from %04X SN %02X \r\n", src_addr16, r->info[PKTINFO_SEQNUM]);
 
 				/* todo: set node activity  flag */
-				link_set_neighbor_activity(r);
+				link_set_neighbor_activity(p);
 
 				/* packet is in buffer, start sending ack */
 				extern BRTOS_Sem* Router_Down_Ack_Request;
@@ -577,10 +603,11 @@ uint8_t unet_packet_input(packet_t *p)
 				if(Router_Down_Ack_Request != NULL)
 				{
 					OSSemPost(Router_Down_Ack_Request);
-				}else
-				{
-					packet_release_down();
 				}
+//				else
+//				{
+//					packet_release_down();
+//				}
 			}
 			break;
 		case UNICAST_ACK_UP:
@@ -610,13 +637,14 @@ uint8_t unet_packet_input(packet_t *p)
 			  * YES: post "ACK DOWN" event |
 			  * NO: discards -> return NO_ACK -> end
 			  */
+//			extern packet_t packet_down;
 			r=&packet_down;
 			PRINTF_ROUTER(1,"RX ACK DOWN, from %u, SN %d, ACK SN: %d\r\n",
 					BYTESTOSHORT(r->info[PKTINFO_DEST16H],r->info[PKTINFO_DEST16L]),
 					r->info[PKTINFO_SEQNUM], p->info[PKTINFO_SEQNUM]);
 
-			/* se o pacote do buffer est� esperando um ack, e o ack recebido � para este pacote (mesmo SN e SRC == DEST),
-			 * ent�o marca ele como ack'ed e posta o sem�foro de ack recebido. */
+			/* se o pacote do buffer está esperando um ack, e o ack recebido é para este pacote (mesmo SN e SRC == DEST),
+			 * então marca ele como ack'ed e posta o semáforo de ack recebido. */
 			if(r->state == PACKET_WAITING_ACK)
 			{
 				if((p->info[PKTINFO_SEQNUM] == r->info[PKTINFO_SEQNUM]) &&

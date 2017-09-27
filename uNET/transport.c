@@ -174,7 +174,7 @@ int unet_send(unet_transport_t *server_client, uint8_t *buffer, uint8_t length, 
 		}
 	}else
 	{
-		res = unet_packet_down_send(payload_len);
+		res = unet_packet_down_send(p, payload_len);
 		if(res == RESULT_PACKET_SEND_OK)
 		{
 			extern BRTOS_Sem * Router_Down_Route_Request;

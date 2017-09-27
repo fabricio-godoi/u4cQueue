@@ -135,7 +135,14 @@ uint8_t ieee802154_packet_input(packet_t *p)
 		{
 			NODESTAT_UPDATE(duplink);
 			p->info[PKTINFO_DUPLICATED] = TRUE;
+			NODESTAT_UPDATE(dupnet);
+//						PRINTF_ROUTER(1,"DROP DUP PACKET, to %u SN %u \r\n",
+//											BYTESTOSHORT(r->info[PKTINFO_DEST16H],r->info[PKTINFO_DEST16L]),r->info[PKTINFO_SEQNUM]);
+
 			PRINTF_LINK(1,"PKT DUPLICATED! from: %u, SN: %u\r\n", BYTESTOSHORT(p->packet[MAC_SRC_16+1],p->packet[MAC_SRC_16]), p->packet[MAC_SEQ_NUM]);
+
+			// Duplicated packet, doesn't need to process it
+			return ACK_REQ_FALSE;
 		}
 	}
 

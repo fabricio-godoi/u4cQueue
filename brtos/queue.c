@@ -50,7 +50,7 @@
 *   Revision: 1.61
 *   Date:     02/12/2010
 *
-*   Authors:  Douglas França
+*   Authors:  Douglas Franï¿½a
 *   Revision: 1.62
 *   Date:     13/12/2010
 *
@@ -117,16 +117,16 @@ uint8_t OSQueueCreate(uint16_t size, BRTOS_Queue **event)
       if (currentTask)
          OSExitCritical();
       
-       return NO_MEMORY;
+       return NO_AVAILABLE_MEMORY;
   }  
   
-  // Verifica se ainda há blocos de controle de eventos disponíveis
+  // Verifica se ainda hï¿½ blocos de controle de eventos disponï¿½veis
   for(i=0;i<=BRTOS_MAX_QUEUE;i++)
   {
     
     if(i >= BRTOS_MAX_QUEUE)
     {
-      // Caso não haja mais blocos disponíveis, retorna exceção
+      // Caso nï¿½o haja mais blocos disponï¿½veis, retorna exceï¿½ï¿½o
       
       // Exit critical Section
       if (currentTask)
@@ -1638,5 +1638,501 @@ uint8_t OSDQueuePost(BRTOS_Queue *pont_event, void *pdata)
 
 
 #endif
+
+#if (BRTOS_GEN_QUEUE_EN == 1)
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+/////      Create Generic Queue Function               /////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+uint8_t OSGQueueCreate(uint16_t queue_length, OS_CPU_TYPE type_size, BRTOS_Queue **event)
+{
+  OS_SR_SAVE_VAR
+  int16_t i=0;
+  uint16_t      size_in_bytes = 0;
+  BRTOS_Queue *pont_event   = NULL;
+  OS_GQUEUE   *cqueue       = NULL;
+
+  if (iNesting > 0) {                                // See if caller is an interrupt
+     return(IRQ_PEND_ERR);                           // Can't be create by interrupt
+  }
+
+  // Enter critical Section
+  if (currentTask)
+     OSEnterCritical();
+
+	if((queue_length > 0) && (type_size > 0))
+	{
+		// Calculate the queue size in bytes
+		size_in_bytes = (uint16_t)(queue_length * type_size);
+
+		// Check if there is enough space
+		if((iGQueueAddress + size_in_bytes) > GQUEUE_HEAP_SIZE){
+			// Exit critical Section
+			if (currentTask)
+			   OSExitCritical();
+
+			return(NO_AVAILABLE_MEMORY);
+		}
+
+		// Check if there is any event control block available
+		for(i=0;i<=BRTOS_MAX_GQUEUE;i++)
+		{
+			if(i >= BRTOS_MAX_GQUEUE)
+			{
+			  // No control block available
+			  // Exit critical Section
+			  if (currentTask)
+				 OSExitCritical();
+
+			  return(NO_AVAILABLE_EVENT);
+			}
+
+
+			if(BRTOS_Queue_Table[i].OSEventAllocated != TRUE)
+			{
+			  BRTOS_GQueue_Table[i].OSEventAllocated = TRUE;
+			  pont_event = &BRTOS_GQueue_Table[i];
+			  cqueue = &BRTOS_OS_GQUEUE_Table[i];
+			  break;
+			}
+		}
+
+	}else
+	{
+      // If queue length or type size equal to zero, do not allocate the queue
+      // Exit critical Section
+      if (currentTask)
+         OSExitCritical();
+
+      return(INVALID_PARAMETERS);
+	}
+
+  // Configura dados de evento de lista
+  cqueue->OSQStart   = (uint8_t *)&GQUEUE_STACK[iGQueueAddress];
+  iGQueueAddress     = (uint16_t)(iGQueueAddress + size_in_bytes);
+  cqueue->OSQLength  = queue_length;
+  cqueue->OSQTSize   = (uint16_t)type_size;
+  cqueue->OSQEntries = 0;
+  cqueue->OSQEnd     = cqueue->OSQStart + size_in_bytes;
+  cqueue->OSQIn      = cqueue->OSQStart;
+  cqueue->OSQOut     = cqueue->OSQStart;
+
+  // Aloca tipo de evento e dados do evento
+  pont_event->OSEventPointer = cqueue;
+  pont_event->OSEventWait = 0;
+
+
+  pont_event->OSEventWaitList=0;
+
+  *event = pont_event;
+
+  // Exit critical Section
+  if (currentTask)
+     OSExitCritical();
+
+  return(ALLOC_EVENT_OK);
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+
+
+
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+/////      Clean Generic Queue Function                /////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+uint8_t OSGQueueClean(BRTOS_Queue *pont_event)
+{
+  OS_SR_SAVE_VAR
+  OS_DQUEUE *cqueue = pont_event->OSEventPointer;
+
+  // Enter Critical Section
+  #if (NESTING_INT == 0)
+  if (!iNesting)
+  #endif
+     OSEnterCritical();
+
+  cqueue->OSQEntries  = 0;
+  cqueue->OSQIn       = cqueue->OSQStart;
+  cqueue->OSQOut      = cqueue->OSQStart;
+
+  // Exit Critical Section
+  #if (NESTING_INT == 0)
+  if (!iNesting)
+  #endif
+    OSExitCritical();
+
+  return CLEAN_BUFFER_OK;
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+
+
+
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+/////      Generic Queue Pend Function                 /////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+uint8_t OSGQueuePend (BRTOS_Queue *pont_event, void *pdata, ostick_t time_wait)
+{
+  OS_SR_SAVE_VAR
+  uint8_t       iPriority = 0;
+  osdtick_t   timeout;
+  uint16_t      n;
+  ContextType *Task;
+  OS_DQUEUE   *cqueue;
+  uint8_t       *dst;
+
+  #if (ERROR_CHECK == 1)
+    /// Can not use Queue pend function from interrupt handling code
+    if(iNesting > 0)
+    {
+      return(IRQ_PEND_ERR);
+    }
+
+    // Verifies if the pointer is NULL
+    if(pont_event == NULL)
+    {
+      return(NULL_EVENT_POINTER);
+    }
+  #endif
+
+  // Enter Critical Section
+  OSEnterCritical();
+  cqueue  = pont_event->OSEventPointer;
+  n       = cqueue->OSQTSize;
+  dst     = (uint8_t*)pdata;
+
+  #if (ERROR_CHECK == 1)
+    // Verifies if the event is allocated
+    if(pont_event->OSEventAllocated != TRUE)
+    {
+      // Exit Critical Section
+      OSExitCritical();
+      return(ERR_EVENT_NO_CREATED);
+    }
+  #endif
+
+  // BRTOS TRACE SUPPORT
+  #if (OSTRACE == 1)
+      #if(OS_TRACE_BY_TASK == 1)
+      Update_OSTrace(currentTask, QUEUEPEND);
+      #else
+      Update_OSTrace(ContextTask[currentTask].Priority, QUEUEPEND);
+      #endif
+  #endif
+
+  // Verify if there is data in the queue
+  if(cqueue->OSQEntries > 0)
+  {
+    // Verify for output pointer overflow
+    if (cqueue->OSQOut == cqueue->OSQEnd)
+      cqueue->OSQOut = cqueue->OSQStart;
+
+    /// TODO evaluate the possibility to copy with memcpy
+    // Copy data from queue
+    while(n)
+    {
+      // copy data and increase the input pointer
+      *dst++ = *cqueue->OSQOut++;
+      n--;
+    }
+
+    // Decreases queue entries
+    cqueue->OSQEntries--;
+
+    // Exit Critical Section
+    OSExitCritical();
+    return READ_BUFFER_OK;
+  }
+  else
+  {
+  	// If no timeout is used and the queue is empty, exit the queue with an error
+	if (time_wait == NO_TIMEOUT){
+		// Exit Critical Section
+	    OSExitCritical();
+	    return EXIT_BY_NO_ENTRY_AVAILABLE;
+	}
+
+    Task = (ContextType*)&ContextTask[currentTask];
+
+    // Copy task priority to local scope
+    iPriority = Task->Priority;
+
+    // Increases the queue wait list counter
+    pont_event->OSEventWait++;
+
+    // Allocates the current task on the queue wait list
+    pont_event->OSEventWaitList = pont_event->OSEventWaitList | (PriorityMask[iPriority]);
+
+    // Task entered suspended state, waiting for queue post
+    #if (VERBOSE == 1)
+    Task->State = SUSPENDED;
+    Task->SuspendedType = QUEUE;
+    #endif
+
+    // Remove current task from the Ready List
+    OSReadyList = OSReadyList & ~(PriorityMask[iPriority]);
+
+    // Set timeout overflow
+    if (time_wait)
+    {
+  	  timeout = (osdtick_t)((osdtick_t)OSGetCount() + (osdtick_t)time_wait);
+
+  	  if (sizeof_ostick_t < 8){
+  		  if (timeout >= TICK_COUNT_OVERFLOW)
+  		  {
+  			  Task->TimeToWait = (ostick_t)(timeout - TICK_COUNT_OVERFLOW);
+  		  }
+  		  else
+  		  {
+  			  Task->TimeToWait = (ostick_t)timeout;
+  		  }
+  	  }else{
+  		  Task->TimeToWait = (ostick_t)timeout;
+  	  }
+
+      // Put task into delay list
+      IncludeTaskIntoDelayList();
+    } else
+    {
+      Task->TimeToWait = NO_TIMEOUT;
+    }
+
+    // Change Context - Returns on time overflow or queue post
+    ChangeContext();
+
+    // Exit Critical Section
+    OSExitCritical();
+    // Enter Critical Section
+    OSEnterCritical();
+
+    if (time_wait)
+    {
+        // Verify if the reason of task wake up was queue timeout
+        if(Task->TimeToWait == EXIT_BY_TIMEOUT)
+        {
+            // Test if both timeout and post have occured before arrive here
+            if ((pont_event->OSEventWaitList & PriorityMask[iPriority]))
+            {
+              // Remove the task from the queue wait list
+              pont_event->OSEventWaitList = pont_event->OSEventWaitList & ~(PriorityMask[iPriority]);
+
+              // Decreases the queue wait list counter
+              pont_event->OSEventWait--;
+
+              // Exit Critical Section
+              OSExitCritical();
+
+              // Indicates queue timeout
+              return TIMEOUT;
+            }
+        }
+        else
+        {
+            // Remove the time to wait condition
+            Task->TimeToWait = NO_TIMEOUT;
+
+            // Remove from delay list
+            RemoveFromDelayList();
+        }
+
+    }
+
+    // Verify for output pointer overflow
+    if (cqueue->OSQOut == cqueue->OSQEnd)
+      cqueue->OSQOut = cqueue->OSQStart;
+
+    // Copy data from queue
+    while(n)
+    {
+      // copy data and increase the input pointer
+      *dst++ = *cqueue->OSQOut++;
+      n--;
+    }
+
+    // Decreases queue entries
+    cqueue->OSQEntries--;
+
+    // Exit Critical Section
+    OSExitCritical();
+    return READ_BUFFER_OK;
+  }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+
+
+
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+/////      Post Generic Queue Function                 /////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+uint8_t OSGQueuePost(BRTOS_Queue *pont_event, void *pdata)
+{
+  OS_SR_SAVE_VAR
+  uint8_t iPriority = (uint8_t)0;
+
+  #if (VERBOSE == 1)
+  uint8_t TaskSelect = 0;
+  #endif
+
+  uint16_t    n;
+  uint8_t     *src;
+  OS_DQUEUE *cqueue;
+
+  #if (ERROR_CHECK == 1)
+    // Verifies if the pointer is NULL
+    if(pont_event == NULL)
+    {
+      return(NULL_EVENT_POINTER);
+    }
+  #endif
+
+  // Enter Critical Section
+  #if (NESTING_INT == 0)
+  if (!iNesting)
+  #endif
+     OSEnterCritical();
+
+  cqueue  = pont_event->OSEventPointer;
+  src     = (uint8_t*)pdata;
+  n       = cqueue->OSQTSize;
+
+  #if (ERROR_CHECK == 1)
+    // Verifies if the event is allocated
+    if(pont_event->OSEventAllocated != TRUE)
+    {
+      // Exit Critical Section
+      #if (NESTING_INT == 0)
+      if (!iNesting)
+      #endif
+         OSExitCritical();
+      return(ERR_EVENT_NO_CREATED);
+    }
+  #endif
+
+  // BRTOS TRACE SUPPORT
+  #if (OSTRACE == 1)
+    if(!iNesting){
+      #if(OS_TRACE_BY_TASK == 1)
+      Update_OSTrace(currentTask, QUEUEPOST);
+      #else
+      Update_OSTrace(ContextTask[currentTask].Priority, QUEUEPOST);
+      #endif
+    }else{
+      Update_OSTrace(0, QUEUEPOST);
+    }
+  #endif
+
+  // Checks for queue overflow
+  if (cqueue->OSQEntries < cqueue->OSQLength)
+  {
+    // If no, increases the queue entries
+    cqueue->OSQEntries++;
+  }
+  else
+  {
+     // Exit Critical Section
+     #if (NESTING_INT == 0)
+     if (!iNesting)
+     #endif
+       OSExitCritical();
+
+     // Indicates queue overflow
+     return BUFFER_UNDERRUN;
+  }
+
+  // Verify for input pointer overflow
+  if (cqueue->OSQIn == cqueue->OSQEnd)
+    cqueue->OSQIn = cqueue->OSQStart;
+
+  // copy data into the queue
+  while(n)
+  {
+    // copy data and increase the input pointer
+    *cqueue->OSQIn++ = *src++;
+    n--;
+  }
+
+  // See if any task is waiting for new data in the queue
+  if (pont_event->OSEventWait != 0)
+  {
+    // Selects the highest priority task
+    iPriority = SAScheduler(pont_event->OSEventWaitList);
+
+    // Remove the selected task from the queue wait list
+    pont_event->OSEventWaitList = pont_event->OSEventWaitList & ~(PriorityMask[iPriority]);
+
+    // Decreases the queue wait list counter
+    pont_event->OSEventWait--;
+
+    // Put the selected task into Ready List
+    #if (VERBOSE == 1)
+    TaskSelect = PriorityVector[iPriority];
+    ContextTask[TaskSelect].State = READY;
+    #endif
+
+    OSReadyList = OSReadyList | (PriorityMask[iPriority]);
+
+    // If outside of an interrupt service routine, change context to the highest priority task
+    // If inside of an interrupt, the interrupt itself will change the context to the highest priority task
+    if (!iNesting)
+    {
+      // Verify if there is a higher priority task ready to run
+      ChangeContext();
+    }
+
+    // Exit Critical Section
+    #if (NESTING_INT == 0)
+    if (!iNesting)
+    #endif
+      OSExitCritical();
+
+    return WRITE_BUFFER_OK;
+  }
+  else
+  {
+    // Exit Critical Section
+    #if (NESTING_INT == 0)
+    if (!iNesting)
+    #endif
+       OSExitCritical();
+
+    return WRITE_BUFFER_OK;
+  }
+}
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+
+#endif // BRTOS_GENERIC_QUEUE_ENABLED
 
 

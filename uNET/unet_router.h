@@ -30,6 +30,7 @@ enum
 	RESULT_TIMEOUT_IN_TRANSIT,
 	RESULT_DESTINATION_NULL,
 	RESULT_PACKET_SEND_ERROR,
+	RESULT_BUFFER_FULL,
 	RESULT_UNKNOWN
 };
 
@@ -45,9 +46,9 @@ void     unet_header_print(packet_t *p);
 uint8_t  unet_packet_input(packet_t *p);
 uint8_t  unet_packet_output(packet_t *pkt, uint8_t tx_retries, uint16_t delay_retry);
 uint8_t  unet_packet_up_sendto(addr64_t * dest_addr64, uint8_t payload_len);
-uint8_t  unet_router_down(void);
-void     unet_update_packet_down_dest(void);
-uint8_t  unet_packet_down_send(uint8_t payload_len);
+uint8_t  unet_router_down(packet_t *p);
+void     unet_update_packet_down_dest(packet_t *p);
+uint8_t  unet_packet_down_send(packet_t *p, uint8_t payload_len);
 uint8_t  unet_router_adv(void);
 void* 	 unet_rtable_up_get(void);
 uint16_t unet_router_up_table_entry_find(addr64_t *dest64);

@@ -57,7 +57,7 @@ Copyright (c) <2009-2013> <Universidade Federal de Santa Maria>
 volatile long i;
 #define PRINT_WAIT(...) PRINTF(__VA_ARGS__); for(i=0;i<200000;i++)
 
-uint16_t unet_verbose = 0; // UNET_VERBOSE_LEVEL_MAX;
+uint16_t unet_verbose = 0; //UNET_VERBOSE_LEVEL_MAX;
 
 /* payload vector - max. bytes = MAX_APP_PAYLOAD_SIZE */
 volatile uint8_t     NWKPayload[MAX_APP_PAYLOAD_SIZE];
@@ -226,8 +226,6 @@ void UNET_Init(void)
  assert(OSSemCreate(0,&(SIGNAL_APP1)) == ALLOC_EVENT_OK);
 #endif
 
-
- /// TODO isn't interesting to install it as priority (debugging reasons)?
   /* Initialize UNET Tasks  */
 #if (TASK_WITH_PARAMETERS == 1)
  assert(OSInstallTask(&UNET_Radio_Task,"Radio Handler",UNET_RADIO_STACKSIZE,
@@ -459,6 +457,9 @@ void UNET_Radio_Task(void)
 	node_data_set(NODE_CHANNEL, CHANNEL_INIT_VALUE);
 	node_data_set(NODE_SEQ_NUM, node_addr16.u8[0]);/* start with a "random" seq. num. */
 
+	/* Create the advertise packet */
+	unet_adv_packet_create();
+
 #if defined TX_POWER_INIT_VALUE
 	UNET_RADIO.set(TXPOWER,TX_POWER_INIT_VALUE);
 #endif
@@ -565,10 +566,9 @@ void UNET_Router_Down_Ack_Task(void* p)
 void UNET_Router_Down_Ack_Task(void)
 {
 #endif
-	extern packet_t packet_down;
-    packet_t *r = &packet_down;
+//	extern packet_t packet_down;
+    packet_t *r;// = &packet_down;
     packet_t *ack = (packet_t *)&Radio_TX_ACK_down_buffer;
-    unet_transport_t *server_client = unet_tp_head;
 
     REQUIRE_FOREVER(OSSemCreate(0,&Router_Down_Ack_Request) == ALLOC_EVENT_OK);
 
@@ -577,11 +577,15 @@ void UNET_Router_Down_Ack_Task(void)
 		wait_next_ack_request:
 		OSSemPend(Router_Down_Ack_Request, 0);
 
-		/* todo: isto � s� para debug e pode ser removido futuramente*/
-		if(r->state != PACKET_SENDING_ACK)
-		{
-			PRINTF_LINK(1,"PACKET STATE ERROR: at %u \r\n", __LINE__);
+
+		while((r = next_packet_down_to_ack()) != NULL){
+			/* check if this packet is pending a ack */
+			if(r->state == PACKET_SENDING_ACK){
+				break;
+			}
 		}
+		/* no more packets to be acked*/
+		if(r == NULL) goto wait_next_ack_request;
 
 		/* copy packet headers to ack buffer */
 		memcpy(ack,r, sizeof(packet_ack_t));
@@ -602,13 +606,13 @@ void UNET_Router_Down_Ack_Task(void)
 			}else
 			{
 				/* o ACK pode ter sido enviado com sucesso,
-				 * mesmo que o ACK da MAC n�o tenha sido recebido,
-				 * pois o link de l� para c� pode estar ruim.
+				 * mesmo que o ACK da MAC não tenha sido recebido,
+				 * pois o link de lá para cá pode estar ruim.
 				 * neste caso, vamos desistir de enviar ACKs por enquanto.
-				 * Mesmo assim, o pacote ser� passado adiante (para roteamento ou entrega),
-				 * mas vamos guardar o SN do pacote, para apagar as c�pias do mesmo que
-				 * eventualmente chegar�o aqui. */
-				/* todo: isto pode ser removido, pois � s� para debug */
+				 * Mesmo assim, o pacote será passado adiante (para roteamento ou entrega),
+				 * mas vamos guardar o SN do pacote, para apagar as cópias do mesmo que
+				 * eventualmente chegarão aqui. */
+				/* todo: isto pode ser removido, pois é só para debug */
 				PRINTF_ROUTER(1,"TX ACK DOWN FAILED, to %u SN %u \r\n", BYTESTOSHORT(ack->info[PKTINFO_DEST16H],ack->info[PKTINFO_DEST16L]),ack->info[PKTINFO_SEQNUM]);
 				ack->state = PACKET_NOT_ACKED;
 				r->state = PACKET_NOT_ACKED;
@@ -616,76 +620,26 @@ void UNET_Router_Down_Ack_Task(void)
 			}
 		}while(ack->state == PACKET_WAITING_TX);
 
-		/* todo: aqui o pacote ser� descartado se for uma duplicata. O teste de duplica��o est� sendo feito antes,
-		 * mas pode ser passado para este ponto futuramente. */
-		if(r->info[PKTINFO_DUPLICATED] == TRUE)
-		{
-
-			packet_release_down();
-
-			NODESTAT_UPDATE(dupnet);
-			PRINTF_ROUTER(1,"DROP DUP PACKET, to %u SN %u \r\n",
-								BYTESTOSHORT(r->info[PKTINFO_DEST16H],r->info[PKTINFO_DEST16L]),r->info[PKTINFO_SEQNUM]);
-			/* estou usando um goto, mas poderia ser um continue */
-			goto wait_next_ack_request;
-		}
-
-		/* se chegou at� aqui, armazena �ltimo numero de sequencia, para ser usado no teste de duplicatas */
+		/* se chegou até aqui, armazena último numero de sequencia, para ser usado no teste de duplicatas */
 		link_set_neighbor_seqnum(r);
 
-		// N�o deveria passar o pacote para a camada superior somente se o ack foi
-		// recebido com sucesso????
-		/* R: se o link daqui para l� estiver muito ruim, o ack pode demorar para ser entregue.
-		 * Ent�o � mais eficiente passar o pacote adiante, e descartar as c�pias futuras. */
+		/*
+		 * wake up router down to finish managing the packet
+		 * it's done this way because the buffer needed to be freed, BUT
+		 * if done in this task, this would cause to remove the element
+		 * in the middle of the queue (eventually), so to avoid it
+		 * the packet is managed in the Down_Task
+		 */
+		OSSemPost(Router_Down_Route_Request);
 
-		/* packet is ack'ed (or not), but is not a duplicate, so we can deliver it to next layer or route it */
-		if(memcmp(&r->packet[UNET_DEST_64],node_addr64_get(),8) == 0)
-		{
-			/* isto � s� para debug e pode ser removido futuramente. */
-			r->state = PACKET_DELIVERED;
-
-			/* todo: colocar este c�digo em uma fun��o unet_packet_deliver(...) */
-
-			/* get the last unet_tp_head */
-			server_client = unet_tp_head;
-
-			if(r->packet[UNET_NEXT_HEADER] == NEXT_HEADER_UNET_APP){
-				NODESTAT_UPDATE(netapprx);
-				while(server_client != NULL){
-					if (server_client->src_port == r->packet[UNET_DEST_PORT]){
-						server_client->packet = &(r->packet[UNET_APP_HEADER_START]);
-						server_client->payload_size = r->packet[UNET_APP_PAYLOAD_LEN];
-						server_client->sender_port = r->packet[UNET_SOURCE_PORT];
-						memcpy(&(server_client->sender_address),&(r->packet[UNET_SRC_64]),8);
-						OSSemPost(server_client->wake_up);
-						if(App_Callback != NULL) OSSemPost(App_Callback);
-						break;
-					}
-					server_client = server_client->next;
-				}
-			}
-			/* pacote foi entregue, e o buffer pode ser liberado. */
-			packet_release_down();
-		}else
-		{
-			/* pacote ser� roteado ou descartado se n�o for poss�vel rote�-lo. */
-			if (unet_router_down() == TRUE)
-			{
-				PRINTF_ROUTER(2,"Packet will be routed down\r\n");
-				OSSemPost(Router_Down_Route_Request);
-			}else
-			{
-
-				/* todo: o que fazer neste caso ?
-				 * Simplesmente descartar ou avisar SRC e/ou DEST disso ?
-				 * Seria interessante guardar nas estat�sticas */
-				PRINTF_ROUTER(2,"Packet route down failure\r\n");
-				packet_release_down();
-			}
+		// If there is more packets to be acked, do it first
+		if(!is_buffer_down_acked()){
+			OSSemPost(Router_Down_Ack_Request);
 		}
 	}
 }
 
+//packet_t packet_down;// = &packet_down;
 #if TASK_WITH_PARAMETERS == 1
 void UNET_Router_Down_Task(void* p)
 {
@@ -695,10 +649,10 @@ void UNET_Router_Down_Task(void)
 {
 #endif
 
-	uint8_t routing_retries;
 	extern packet_t packet_down;
-    packet_t *r = &packet_down;
+	uint8_t routing_retries;
     trickle_t timer_down_retry;
+    unet_transport_t *server_client = unet_tp_head;
 
     REQUIRE_FOREVER(OSSemCreate(0,&Router_Down_Route_Request) == ALLOC_EVENT_OK);
     REQUIRE_FOREVER(OSSemCreate(0,&Router_Down_Ack_Received) == ALLOC_EVENT_OK);
@@ -735,12 +689,12 @@ void UNET_Router_Down_Task(void)
 			#endif
 		}else{
 			#if UNET_DEVICE_TYPE != PAN_COORDINATOR
-			// Isso � necess�rio para corrigir as rotas, mas e se estiver roteando um pacote?
-			// Acredito que � necess�rio verificar se foi acordado pelo roteamento
-			// ou se foi pelas altera��es de link. Como verificar se um pacote foi
-			// agendado para roteamento? Que teste fazer? O teste de trickle reseted � suficiente?
-			// A ideia do trickle reset � a seguinte: quando for acordado por altera��es
-			// de link, o trickle estar� resetado. Da� o pq de s� enviar o router_adv nesse caso.
+			// Isso é necessário para corrigir as rotas, mas e se estiver roteando um pacote?
+			// Acredito que é necessário verificar se foi acordado pelo roteamento
+			// ou se foi pelas alterações de link. Como verificar se um pacote foi
+			// agendado para roteamento? Que teste fazer? O teste de trickle reseted é suficiente?
+			// A ideia do trickle reset é a seguinte: quando for acordado por alterações
+			// de link, o trickle estará resetado. Daí o pq de só enviar o router_adv nesse caso.
 			if ((is_trickle_reseted(&timer_down) == TRUE) && (packet_down.state == PACKET_IDLE)){
 				if(unet_router_adv() != RESULT_PACKET_SEND_OK)
 				{
@@ -750,7 +704,101 @@ void UNET_Router_Down_Task(void)
 			#endif
 		}
 
-		r->state = PACKET_WAITING_TX;
+		// Get a packet from the buffer, if is empty there was some error getting here
+		if(get_packet_down(&packet_down) == NO_ENTRY_AVAILABLE) goto wait_again;
+
+		// TODO this should be done after inserting in the buffer
+		// Check if it's a duplicated packet
+		if(packet_down.info[PKTINFO_DUPLICATED] == TRUE)
+		{
+
+//			packet_release_down();
+
+			NODESTAT_UPDATE(dupnet);
+			PRINTF_ROUTER(1,"DROP DUP PACKET, to %u SN %u \r\n",
+								BYTESTOSHORT(packet_down.info[PKTINFO_DEST16H],
+								packet_down.info[PKTINFO_DEST16L]),packet_down.info[PKTINFO_SEQNUM]);
+			goto wait_again;
+		}
+
+		// If get here called by application when the packet in the first place in queue
+		// still being acked, return to wait ack until it's done
+		/**
+		 * But by priority, if there is any data being processed in the ack_down task,
+		 * this task will be only freed when another task is done...
+		 * so it shouldn't be a problem.
+		 */
+
+
+		// Não deveria passar o pacote para a camada superior somente se o ack foi
+		// recebido com sucesso????
+		/* R: se o link daqui para lá estiver muito ruim, o ack pode demorar para ser entregue.
+		 * Então é mais eficiente passar o pacote adiante, e descartar as cópias futuras. */
+
+		/* packet is ack'ed (or not), but is not a duplicate, so we can deliver it to next layer or route it */
+//		printf("Down [D: %d][S: %d]\n",packet_down.packet[UNET_DEST_64+7],packet_down.packet[UNET_SRC_64+7]);
+		if(memcmp(&packet_down.packet[UNET_DEST_64],node_addr64_get(),8) == 0)
+		{
+
+//			printf("PACKET FOUND DESTINATION\n");
+//			packet_print_info(&packet_down);
+
+			/* isto � s� para debug e pode ser removido futuramente. */
+			packet_down.state = PACKET_DELIVERED;
+
+			/* todo: colocar este código em uma função unet_packet_deliver(...) */
+
+			/* get the last unet_tp_head */
+			server_client = unet_tp_head;
+
+			if(packet_down.packet[UNET_NEXT_HEADER] == NEXT_HEADER_UNET_APP){
+				NODESTAT_UPDATE(netapprx);
+				while(server_client != NULL){
+					if (server_client->src_port == packet_down.packet[UNET_DEST_PORT]){
+						// TODO this packet must be copied instead linked
+						server_client->packet = &(packet_down.packet[UNET_APP_HEADER_START]);
+						server_client->payload_size = packet_down.packet[UNET_APP_PAYLOAD_LEN];
+						server_client->sender_port = packet_down.packet[UNET_SOURCE_PORT];
+						memcpy(&(server_client->sender_address),&(packet_down.packet[UNET_SRC_64]),8);
+						OSSemPost(server_client->wake_up);
+						if(App_Callback != NULL) OSSemPost(App_Callback);
+						break;
+					}
+					server_client = server_client->next;
+				}
+			}
+
+			// Buffer not used to send ACK
+			/* pacote foi entregue, e o buffer pode ser liberado. */
+			goto wait_again;
+//			packet_release_down();
+		}else
+		{
+			/////// TODO PROBLEMA.....
+			//////////// PACOTES DA APP JA PASSARAM PELO ROUTER DOWN
+			/* this function update source and destination */
+			/* pacote será roteado ou descartado se não for possível roteá-lo. */
+			if (unet_router_down(&packet_down) == TRUE)
+			{
+				PRINTF_ROUTER(2,"Packet will be routed down\r\n");
+//				OSSemPost(Router_Down_Route_Request);
+			}else
+			{
+
+				// If there is no route, the send task will handle it
+
+				/* todo: o que fazer neste caso ?
+				 * Simplesmente descartar ou avisar SRC e/ou DEST disso ?
+				 * Seria interessante guardar nas estatísticas */
+				PRINTF_ROUTER(2,"Packet route down failure\r\n");
+				goto wait_again;
+				// Automatically drop
+//				packet_release_down();
+			}
+		}
+
+//		if(p.state == PACKET_ACKED); /// packet aked, so it's ready to be routed
+		packet_down.state = PACKET_WAITING_TX;
 
 		/* quantas vezes vale a pena tentar a transmiss�o? */
 		routing_retries = 10*NWK_TX_RETRIES;
@@ -759,12 +807,12 @@ void UNET_Router_Down_Task(void)
 		while(routing_retries-- > 0)
 		{
 			/* send packet down */
-			if(unet_packet_output(r, NWK_TX_RETRIES, 10) == PACKET_SEND_OK)
+			if(unet_packet_output(&packet_down, NWK_TX_RETRIES, 10) == PACKET_SEND_OK)
 			{
-				/* se veio o ACK da MAC, ent�o o pacote chegou at� o outro lado.
-				 * Neste caso, pode n�o ter espa�o no buffer, ou este pacote j� pode estar duplicado do outro lado,
-				 * mas o ACK ainda n�o foi recebido. Neste caso, n�o vamos descontar do routing_retries,
-				 * pois vale a pena continuar tentando, j� que o link est� funcionando. */
+				/* se veio o ACK da MAC, então o pacote chegou até o outro lado.
+				 * Neste caso, pode não ter espaço no buffer, ou este pacote já pode estar duplicado do outro lado,
+				 * mas o ACK ainda não foi recebido. Neste caso, não vamos descontar do routing_retries,
+				 * pois vale a pena continuar tentando, já que o link está funcionando. */
 				++routing_retries;
 
 				/**
@@ -784,56 +832,56 @@ void UNET_Router_Down_Task(void)
 				 * 		 respectivos. Entrentanto, como o buffer de ambos estão ocupados
 				 * 		 com a transmissao, o ACK nao e enviado.
 				 */
-				if(packet_get_dest_addr16(r) != link_get_parent_addr16()){
+				if(packet_get_dest_addr16(&packet_down) != link_get_parent_addr16()){
 					// Route has changed between transmissions, update the packet next hop
 					PRINTF_ROUTER(1,"ROUTE DEST UPDATE: was %d now is %d \r\n",
-							packet_get_dest_addr16(r), link_get_parent_addr16());
-					unet_update_packet_down_dest();
+							packet_get_dest_addr16(&packet_down), link_get_parent_addr16());
+					unet_update_packet_down_dest(&packet_down);
 				}
 
 				PRINTF_ROUTER(1,"TX DOWN, WAIT ACK, to %u, SN %d \r\n",
-						BYTESTOSHORT(r->info[PKTINFO_DEST16H],r->info[PKTINFO_DEST16L]),
-						r->info[PKTINFO_SEQNUM]);
+						BYTESTOSHORT(packet_down.info[PKTINFO_DEST16H],packet_down.info[PKTINFO_DEST16L]),
+						packet_down.info[PKTINFO_SEQNUM]);
 			}
 
-			/* aguarda o ACK mesmo que n�o tenha recebido o ACK da MAC,
+			/* aguarda o ACK mesmo que não tenha recebido o ACK da MAC,
 			 * pois o pacote pode ter sido transmitido com sucesso,
-			 * mas o ACK da MAC foi perdido. O link de l� pra c� est� ruim, mas pode
+			 * mas o ACK da MAC foi perdido. O link de lá pra cá está ruim, mas pode
 			 * ser que o ACK chegue mesmo assim. */
-			r->state = PACKET_WAITING_ACK;
+			packet_down.state = PACKET_WAITING_ACK;
 
 			/* wait ack rx */
 			run_trickle(&timer_down_retry);
 			if(OSSemPend(Router_Down_Ack_Received, timer_down_retry.t) != TIMEOUT)
 			{
-				/* isto � s� p/ debug, pois quando o sem�foro � postado,
+				/* isto é só p/ debug, pois quando o semáforo é postado,
 				 * o estado do pacote passa para ACKED.
-				 * Como o buffer do pacote ser� liberado,
-				 * dever�amos garantir que o sem�foro valha zero,
-				 * por isso talvez seja necess�rio mudar p/ sem�foro bin�rio. */
-				if(r->state != PACKET_ACKED)
+				 * Como o buffer do pacote será liberado,
+				 * deveríamos garantir que o semáforo valha zero,
+				 * por isso talvez seja necessário mudar p/ semáforo binário. */
+				if(packet_down.state != PACKET_ACKED)
 				{
 					PRINTF_LINK(1,"PACKET STATE ERROR: at %u \r\n", __LINE__);
 				}
 
 				/* ack is received, free buffer */
 				NODESTAT_UPDATE(routed);
-				packet_release_down();
+//				packet_release_down();
 
 				PRINTF_ROUTER(1,"TX DOWN, RX ACK, from %u, SN %d \r\n",
-						BYTESTOSHORT(r->info[PKTINFO_DEST16H],r->info[PKTINFO_DEST16L]),
-						r->info[PKTINFO_SEQNUM]);
+						BYTESTOSHORT(packet_down.info[PKTINFO_DEST16H],packet_down.info[PKTINFO_DEST16L]),
+						packet_down.info[PKTINFO_SEQNUM]);
 				(void)node_data_set(NODE_PARENTFAILURES, 0);
 				break;
 			}else
 			{
-				/* Se chegou at� aqui, � porque mesmo ap�s v�rias tentativas n�o foi poss�vel enviar o pacote.
-				 * Neste caso, vamos desistir e liberar o buffer. Poder�amos tamb�m dar um tempo,
-				 * e tentar mais um pouco mais adiante, mas � d�ficil saber at� quando vale a pena tentar.
-				 * Em https://sing.stanford.edu/pubs/sensys08-beta.pdf, sugere-se retentar ap�s 500ms,
+				/* Se chegou até aqui, é porque mesmo após várias tentativas não foi possível enviar o pacote.
+				 * Neste caso, vamos desistir e liberar o buffer. Poderíamos também dar um tempo,
+				 * e tentar mais um pouco mais adiante, mas é díficil saber até quando vale a pena tentar.
+				 * Em https://sing.stanford.edu/pubs/sensys08-beta.pdf, sugere-se retentar após 500ms,
 				 * devido ao "link burstiness".
-				 * Outra op��o � tentar trocar de parent/rota,
-				 * mas isso pode causar replica��o de pacote, pois o pacote pode ter chegado do outro
+				 * Outra opção é tentar trocar de parent/rota,
+				 * mas isso pode causar replicação de pacote, pois o pacote pode ter chegado do outro
 				 * lado e estar sendo roteado.  */
 
 
@@ -841,10 +889,10 @@ void UNET_Router_Down_Task(void)
 				/* packet lost, free buffer */
 				if(routing_retries == 0)
 				{
-					packet_release_down();
+//					packet_release_down();
 
 					NODESTAT_UPDATE(routdrop);
-					PRINTF_ROUTER(1,"TX DOWN LOST, SN %d\r\n",r->info[PKTINFO_SEQNUM]);
+					PRINTF_ROUTER(1,"TX DOWN LOST, SN %d\r\n",packet_down.info[PKTINFO_SEQNUM]);
 
 					uint8_t failures = node_data_get(NODE_PARENTFAILURES);
 					failures++;
@@ -867,6 +915,15 @@ void UNET_Router_Down_Task(void)
 				}
 			}
 		}
+
+
+		/**
+		 * If there any packet in the buffer, go and handle it
+		 */
+		if(!is_buffer_down_empty()){
+			OSSemPost(Router_Down_Route_Request);
+		}
+
 	}
 }
 

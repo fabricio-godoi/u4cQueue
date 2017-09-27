@@ -445,6 +445,32 @@ typedef struct
 
 
 
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+/////      Generic Queue Structure                     /////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+/**
+* \struct OS_QUEUE
+* Generic Queue Control Block Structure
+*/
+typedef struct
+{
+  uint8_t        *OSQStart;               ///< Pointer to the queue start
+  uint8_t        *OSQEnd;                 ///< Pointer to the queue end
+  uint8_t        *OSQIn;                  ///< Pointer to the next queue entry
+  uint8_t        *OSQOut;                 ///< Pointer to the next data in the queue output
+  uint16_t       OSQTSize;                ///< Size of the queue type - Defined in the create queue function
+  uint16_t       OSQLength;               ///< Length of the queue - Defined in the create queue function
+  uint16_t       OSQEntries;              ///< Size of data inside the queue
+} OS_GQUEUE;
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
 
 
 ////////////////////////////////////////////////////////////
@@ -770,6 +796,11 @@ uint8_t SAScheduler(PriorityType ReadyList);
   extern OS_QUEUE	 BRTOS_OS_QUEUE_Table[BRTOS_MAX_QUEUE];
 #endif
 
+#if (BRTOS_GEN_QUEUE_EN == 1)
+  /// Generic Queue Control Block
+  extern BRTOS_Queue BRTOS_GQueue_Table[BRTOS_MAX_GQUEUE];
+  extern OS_GQUEUE	 BRTOS_OS_GQUEUE_Table[BRTOS_MAX_GQUEUE];
+#endif
 
 /*****************************************************************************************//**
 * \fn void initEvents(void)
@@ -961,6 +992,7 @@ void initEvents(void);
   * \return IRQ_PEND_ERR Can not use queue create function from interrupt handler code
   * \return NO_AVAILABLE_EVENT No queue control blocks available
   * \return ALLOC_EVENT_OK Queue control block successfully allocated
+  * \return NO_AVAILABLE_MEMORY When the size requested overflow the queue heap size
   *********************************************************************************************/
   uint8_t OSQueueCreate(uint16_t size, BRTOS_Queue **event);
  
@@ -1204,6 +1236,64 @@ void initEvents(void);
 
 
 
+#if (BRTOS_GEN_QUEUE_EN == 1)
+
+  /*****************************************************************************************//**
+  * \fn uint8_t OSGQueueCreate(uint16_t queue_lenght, OS_CPU_TYPE type_size, BRTOS_Queue **event)
+  * \brief Allocates a queue control block and a memory region in the generic queue heap
+  * \param queue_lenght Queue lenght
+  * \param type_size Queue type size
+  * \param **event Queue event pointer
+  * \return INVALID_PARAMETERS There is at least one invalid parameter
+  * \return NO_AVAILABLE_MEMORY There is no memory for allocate the queue in the heap
+  * \return IRQ_PEND_ERR Can not use queue create function from interrupt handler code
+  * \return NO_AVAILABLE_EVENT No queue control blocks available
+  * \return ALLOC_EVENT_OK Queue control block successfully allocated
+  *********************************************************************************************/
+  uint8_t OSDQueueCreate(uint16_t queue_lenght, OS_CPU_TYPE type_size, BRTOS_Queue **event);
+
+  /*****************************************************************************************//**
+  * \fn uint8_t OSGQueueClean(BRTOS_Queue *pont_event)
+  * \brief Clean data in the specified queue
+  * \param **event Queue event pointer
+  * \return CLEAN_BUFFER_OK Queue successfully cleaned
+  *********************************************************************************************/
+  uint8_t OSGQueueClean(BRTOS_Queue *pont_event);
+
+  /*****************************************************************************************//**
+  * \fn uint8_t OSGQueuePend (BRTOS_Queue *pont_event, void *pdata, ostick_t time_wait)
+  * \brief Wait for a queue post
+  *  A task exits a pending state with a queue post or by timeout.
+  * \param *pont_event Queue event pointer
+  * \param timeout Timeout to the queue pend exits
+  * \param *pdata First data in the output buffer of the specified queue
+  * \return ERR_EVENT_NO_CREATED The pont_event is not valid
+  * \return TIMEOUT The queue pend exit by timeout
+  * \return READ_BUFFER_OK The queue was successfully read
+  *********************************************************************************************/
+  uint8_t OSGQueuePend (BRTOS_Queue *pont_event, void *pdata, ostick_t time_wait);
+
+  /*****************************************************************************************//**
+  * \fn uint8_t OSGQueuePost(BRTOS_Queue *pont_event, void *pdata)
+  * \brief Queue post
+  *  A task exits a pending state with a queue post or by timeout.
+  * \param *pont_event Queue event pointer
+  * \param *pdata Pointer of the data to be written in the queue
+  * \param timeout Timeout to the queue pend exits
+  * \return
+  *********************************************************************************************/
+  uint8_t OSGQueuePost(BRTOS_Queue *pont_event, void *pdata);
+#endif
+
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////
+
+
+
+
+
 ////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////
 /////      OS Variables Extern Declarations            /////
@@ -1242,8 +1332,15 @@ extern volatile uint32_t      OSDutyTmp;
 	#error("You must define the OS_CPU_TYPE !!!")
 #endif
 
+#ifdef BRTOS_GEN_QUEUE_EN
+#if (BRTOS_GEN_QUEUE_EN == 1)
+  extern unsigned char GQUEUE_STACK[GQUEUE_HEAP_SIZE];
+#endif
+#endif
+
 extern uint32_t TaskAlloc;
 extern uint16_t iQueueAddress;
+extern uint16_t iGQueueAddress;
 
 #if (PROCESSOR == ATMEGA)
 #if (!defined __GNUC__)

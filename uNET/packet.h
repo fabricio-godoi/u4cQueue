@@ -174,6 +174,38 @@ typedef struct
 	uint8_t packet[MAX_PACKET_ACK_SIZE];
 } packet_ack_t;
 
+
+typedef struct{
+	uint8_t entries;	//! Number of entries inserted
+	uint8_t start;		//! Start point of the queue
+	uint8_t end;		//! End point of the queue
+	uint8_t ack;		//! Index of packets that already ACKed
+}buffer_ctrl_t;
+extern buffer_ctrl_t pdown_ctrl;
+
+
+/** buffer functions */
+
+/* \brief Check if the buffer down is empty */
+#define is_buffer_down_empty() ((pdown_ctrl.entries==0)?TRUE:FALSE)
+
+/* \brief Check if the buffer down is full */
+#define is_buffer_down_full()  ((pdown_ctrl.entries==UNET_DOWN_BUF_SIZE)?TRUE:FALSE)
+
+/* \brief All packets in the buffer is acked? */
+#define is_buffer_down_acked() ((pdown_ctrl.ack == pdown_ctrl.end)?TRUE:FALSE)
+
+
+uint8_t add_packet_down(packet_t *p);
+uint8_t get_packet_down(packet_t *p);
+packet_t* aquire_packet_down(void);
+void release_packet_down (void);
+packet_t* edit_packet_down(uint8_t i);
+void update_packet_down_header_status(packet_state_t s);
+packet_t* next_packet_down_to_ack();
+void packet_clear_buffer_down(void);
+
+
 /** generic packet functions */
 uint8_t  packet_info_set(packet_t *pkt, packet_info_t opt, uint8_t val);
 uint8_t  packet_info_get(packet_t *pkt, packet_info_t opt);
@@ -187,5 +219,6 @@ void     packet_print(uint8_t *pkt, uint8_t len);
 uint16_t packet_get_source_addr16(packet_t *pkt);
 uint16_t packet_get_dest_addr16(packet_t *pkt);
 
+void packet_print_info(packet_t *p);
 
 #endif /* UNET_PACKET_H_ */

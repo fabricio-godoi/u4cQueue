@@ -8,6 +8,9 @@
 ///////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////
 
+#ifndef BRTOSCONFIG_H_
+#define BRTOSCONFIG_H_
+
 // Include simulator
 #include "cooja.h"
 
@@ -60,7 +63,7 @@
 #define NUMBER_MIN_OF_STACKED_BYTES	52  // (R4-R15) [48 B] + (SR + PC) [4 B]
 /// Minimum size of a task stack.
 
-// User defined: stacked for user function calls + local variables
+// User defined: stacked for usher function calls + local variables
 // Ainda, como podem ocorrer interrucoes durante as tarefas, alocar 28 bytes a cada
 // interrupcao ativa
 
@@ -106,6 +109,9 @@
 /// Enable or disable dynamic queue controls
 #define BRTOS_DYNAMIC_QUEUE_ENABLED	0
 
+/// Enable or disable generic queue controls
+#define BRTOS_GEN_QUEUE_EN	   0
+
 /// Enable or disable queue 16 bits controls
 #define BRTOS_QUEUE_16_EN      0
 
@@ -124,9 +130,13 @@
 /// Limits the memory allocation mailboxes
 #define BRTOS_MAX_MBOX         0
 
-/// Defines the maximum number of queues\n
+/// Defines the maximum number of queues
 /// Limits the memory allocation for queuesAPP3_Priority
+/// Make sure to leave at least 2 for the uNet queues (up and down buffers)
 #define BRTOS_MAX_QUEUE        1
+
+/// Defines the maximum number of generic queues
+#define BRTOS_MAX_GQUEUE       2
 
 
 /// TickTimer Defines
@@ -146,16 +156,24 @@
 /// msp430f2617 8kb RAM /// msp430f5437 16kb RAM
 #define HEAP_SIZE 			2*4096 // 4400 its just enough for 9 tasks
 
-// Queue heap defines
-// Configurado com 32 bytes p/ filas (para filas)
-#define QUEUE_HEAP_SIZE 	128
+/**
+ * Queue heap defines
+ * Configured:
+ *    uart/serial: 32 bytes
+ */
+#define QUEUE_HEAP_SIZE 	32
+//+(UNET_UP_BUFFER_SIZE+UNET_DOWN_BUFFER_SIZE)*UNET_PACKET_SIZE
 
-// Dynamic head define. To be used by DynamicInstallTask and Dynamic Queues
-//#define DYNAMIC_HEAP_SIZE	1*1024
+/**
+ * Dynamic head define
+ * Configured:
+ *    unet buffer: defined by number of packets (NetConfig.h)
+ */
+//#define GQUEUE_HEAP_SIZE (UNET_UP_BUFFER_SIZE+UNET_DOWN_BUFFER_SIZE)*UNET_PACKET_SIZE
 
 //** Enable/Disable printf standard library **//
 //** Must be configured as project specifications**//
-#define PRINTF_EN 		0
+#define PRINTF_EN 		1
 #define PRINTF_ARGS_EN 	1
 
 #if PRINTF_EN
@@ -173,3 +191,5 @@
 #define assert(x) if(!(x)){ while(1); }
 #endif // PRINTF_EN
 
+
+#endif // BRTOSCONFIG_H_
