@@ -98,8 +98,10 @@ int unet_recv(unet_transport_t *server_client, uint8_t *buffer, ostick_t timeout
  */
 
 volatile ostick_t last_transmition_time = 0;
+packet_t application_packet;
+
 int unet_send(unet_transport_t *server_client, uint8_t *buffer, uint8_t length, uint16_t ret_time){
-	packet_t  *p;
+	packet_t  *p = &application_packet;
 	uint8_t up_route = 0;
 	int ret = -1;
 	int ret_cnt = 0;
@@ -109,46 +111,48 @@ int unet_send(unet_transport_t *server_client, uint8_t *buffer, uint8_t length, 
 	if (!ret_time) ret_time = 10;
 	if (ret_time > MAX_TRANSP_TIME) ret_time = MAX_TRANSP_TIME;
 
-	// C�lcula quantidade de retentativas
+	// Cálcula quantidade de retentativas
 	ret_limit = MAX_TRANSP_TIME / ret_time;
 
 	if (memcmp(node_pan_id64_get(),server_client->dest_address,8) == 0)
 	{
 		up_route = FALSE;
-		p = &packet_down;
+//		p = &packet_down;
 	}else
 	{
 		up_route = TRUE;
-		p = &packet_up;
+//		p = &packet_up;
 	}
 
-	do
-	{
-		if (up_route == TRUE)
-		{
-			if(packet_acquire_up() == PACKET_ACCESS_DENIED)
-			{
-				ret = -1;
-			}else
-			{
-				break;
-			}
-		}else
-		{
-			if(packet_acquire_down() == PACKET_ACCESS_DENIED)
-			{
-				ret = -1;
-			}else{
-				break;
-			}
-		}
-		OSDelayTask(ret_time);
-		ret_cnt++;
-		if (ret_cnt >= ret_limit)
-		{
-			return -1;
-		}
-	}while(ret == -1);
+//	do
+//	{
+//		if (up_route == TRUE)
+//		{
+//			if(packet_acquire_up() == PACKET_ACCESS_DENIED)
+//			{
+//				ret = -1;
+//			}else
+//			{
+//
+//				break;
+//			}
+//		}else
+//		{
+//			if(packet_acquire_down() == PACKET_ACCESS_DENIED)
+//			if((p = aquire_packet_down()) == NULL)
+//			{
+//				ret = -1;
+//			}else{
+//				break;
+//			}
+//		}
+//		OSDelayTask(ret_time);
+//		ret_cnt++;
+//		if (ret_cnt >= ret_limit)
+//		{
+//			return -1;
+//		}
+//	}while(ret == -1);
 
 	ostick_t transmition_time = OSGetTickCount();
 	// Deixa um tempo para o pacote anterior ser emcaminhado
@@ -161,27 +165,30 @@ int unet_send(unet_transport_t *server_client, uint8_t *buffer, uint8_t length, 
 
 	uint8_t payload_len = length+(UNET_TRANSP_HEADER_END-UNET_TRANSP_HEADER_START);
 	uint8_t res = 0;
-	if (up_route == TRUE)
-	{
-		res = unet_packet_up_sendto(server_client->dest_address, payload_len);
-		if(res == RESULT_PACKET_SEND_OK)
-		{
-			extern BRTOS_Sem * Router_Up_Route_Request;
-			OSSemPost(Router_Up_Route_Request);
-		}else
-		{
-			packet_release_up();
+	if (up_route == TRUE){
+//		res = unet_packet_up_sendto(server_client->dest_address, payload_len);
+//		if(res == RESULT_PACKET_SEND_OK)
+//		{
+//			extern BRTOS_Sem * Router_Up_Route_Request;
+//			OSSemPost(Router_Up_Route_Request);
+//		}else
+//		{
+//			packet_release_up();
+//		}
+	}
+	else{
+		while((res = unet_packet_down_send(&p, payload_len)) == RESULT_BUFFER_FULL){
+			OSDelayTask(ret_time);
+			ret_cnt++;
+			if (ret_cnt >= ret_limit){
+				break;
+			}
 		}
-	}else
-	{
-		res = unet_packet_down_send(p, payload_len);
-		if(res == RESULT_PACKET_SEND_OK)
-		{
+		if(res == RESULT_PACKET_SEND_OK){
+			// Packet in the buffer ready to go
 			extern BRTOS_Sem * Router_Down_Route_Request;
 			OSSemPost(Router_Down_Route_Request);
-		}else
-		{
-			packet_release_down();
+
 		}
 	}
 

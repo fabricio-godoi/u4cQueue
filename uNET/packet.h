@@ -196,21 +196,15 @@ extern buffer_ctrl_t pdown_ctrl;
 #define is_buffer_down_acked() ((pdown_ctrl.ack == pdown_ctrl.end)?TRUE:FALSE)
 
 
-uint8_t add_packet_down(packet_t *p);
-uint8_t get_packet_down(packet_t *p);
-packet_t* aquire_packet_down(void);
-void release_packet_down (void);
-packet_t* edit_packet_down(uint8_t i);
-void update_packet_down_header_status(packet_state_t s);
-packet_t* next_packet_down_to_ack();
+uint8_t packet_push_down(packet_t *p);
+uint8_t packet_pull_down(packet_t *p);
+packet_t* packet_down_next_to_ack();
 void packet_clear_buffer_down(void);
 
 
 /** generic packet functions */
 uint8_t  packet_info_set(packet_t *pkt, packet_info_t opt, uint8_t val);
 uint8_t  packet_info_get(packet_t *pkt, packet_info_t opt);
-uint8_t  packet_acquire_down(void);
-void     packet_release_down(void);
 uint8_t  packet_acquire_up(void);
 void     packet_release_up(void);
 packet_state_t  packet_state_down(void);

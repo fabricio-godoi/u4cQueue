@@ -30,8 +30,8 @@
  * packet_t size if 142 bytes
  *  default: using 16 pkts down and 1 pkt up- 2414 bytes
  */
-#define UNET_UP_BUF_SIZE				1
-#define UNET_DOWN_BUF_SIZE 			16
+#define UNET_UP_BUF_SIZE					1
+#define UNET_DOWN_BUF_SIZE 					16
 
 // Network device types
 #define   PAN_COORDINATOR                   0   // Server

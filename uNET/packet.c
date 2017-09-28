@@ -22,7 +22,7 @@ packet_t packet_multicast_up;
  * \return WRITE_BUFFER_OK When successfully copied
  * \return NO_AVAILABLE_MEMORY When the buffer is full
  */
-uint8_t add_packet_down(packet_t *p){
+uint8_t packet_push_down(packet_t *p){
 	// Check if there is available space
 	if(pdown_ctrl.entries < UNET_DOWN_BUF_SIZE){
 		pdown_ctrl.entries++;
@@ -40,7 +40,7 @@ uint8_t add_packet_down(packet_t *p){
  * \return READ_BUFFER_OK When successfully copied
  * \return NO_ENTRY_AVAILABLE When there is no entry in the buffer
  */
-uint8_t get_packet_down(packet_t *p){
+uint8_t packet_pull_down(packet_t *p){
 	// Check if there is any entry in the buffer
 	if(pdown_ctrl.entries){
 		memcpy(p,&(buffer_down[pdown_ctrl.start]),sizeof(packet_t));
@@ -52,58 +52,11 @@ uint8_t get_packet_down(packet_t *p){
 	return NO_ENTRY_AVAILABLE;
 }
 
-
-/**
- * \brief If there is any space on buffer, get the end of line
- *        and return it to be used as a packet that will be inserted
- *        in the queue.
- * \return packet_t* Return the last packet not in use in the buffer
- */
-packet_t* aquire_packet_down(void){
-	packet_t *p = NULL;
-	if(!is_buffer_down_full()){
-		if(++pdown_ctrl.end == UNET_DOWN_BUF_SIZE) pdown_ctrl.end = 0;
-		p = &buffer_down[pdown_ctrl.end];
-		pdown_ctrl.entries++;
-	}
-	return p;
-}
-
-/**
- * \brief Just release/remove the first packet
- */
-void release_packet_down (void){
-	// If there is any entry
-	if(pdown_ctrl.entries){
-		// Remove it from the queue
-		if(++pdown_ctrl.start == UNET_DOWN_BUF_SIZE) pdown_ctrl.start = 0;
-		pdown_ctrl.entries--;
-	}
-}
-
-/**
- * \brief Get the packet address to be able to edit inside the queue
- * \param i Is the packet index inside the queue (eg. pdown_ctrl.start)
- * \return packet_t* Is the address of the packet inside the queue
- * TODO maybe substitute this function to a status update only
- */
-packet_t* edit_packet_down(uint8_t i){
-	return &buffer_down[i];
-}
-
-/**
- * \brief Update the status of the first element of the queue
- * \param s the status that will be set
- */
-void update_packet_down_header_status(packet_state_t s){
-	buffer_down[pdown_ctrl.ack].state = s;
-}
-
 /**
  * \brief Get the next packet to be ACKed
  * \return packet_t* Return the pointer to the packet in the queue
  */
-packet_t* next_packet_down_to_ack(){
+packet_t* packet_down_next_to_ack(){
 	packet_t *p;
 	while(pdown_ctrl.ack != pdown_ctrl.end){
 		p = &buffer_down[pdown_ctrl.ack];
@@ -159,37 +112,6 @@ void packet_print(uint8_t *pkt, uint8_t len)
 #else
 	(void)pkt; (void)len;
 #endif
-}
-/*--------------------------------------------------------------------------------------------*/
-uint8_t packet_acquire_down(void)
-{
-	OS_SR_SAVE_VAR
-	extern packet_t packet_down;
-	/* todo : use a mutex with timeout */
-	OSEnterCritical();
-	if(packet_down.state != PACKET_IDLE)
-	{
-		OSExitCritical();
-		return PACKET_ACCESS_DENIED;
-	}else
-	{
-
-		packet_down.state = PACKET_START_ROUTE;
-		OSExitCritical();
-		return PACKET_ACCESS_ALLOWED;
-	}
-
-}
-/*--------------------------------------------------------------------------------------------*/
-void packet_release_down(void)
-{
-	OS_SR_SAVE_VAR
-	extern packet_t packet_down;
-	/* todo : use a mutex */
-	OSEnterCritical();
-//	packet_down.state = PACKET_IDLE;
-	release_packet_down();
-	OSExitCritical();
 }
 /*--------------------------------------------------------------------------------------------*/
 uint8_t packet_acquire_up(void)
@@ -280,9 +202,6 @@ const char* header_to_string(uint8_t t){
  * \param *str Is where the string will be stored
  */
 void packet_to_string(packet_t *p, char *str){
-
-
-
 	sprintf(str,"[LEN %d][FC %04X][SN %d][PID %04X][D16 %d][S16 %d][PT %s][PAYL %d][NH %s][S %d][D %d][ALEN %d][>%s]",
 			p->packet[PHY_PKT_SIZE],
 			(uint16_t)(p->packet[MAC_FRAME_CTRL] | p->packet[MAC_FRAME_CTRL+1]<<8),

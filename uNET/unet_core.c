@@ -578,7 +578,7 @@ void UNET_Router_Down_Ack_Task(void)
 		OSSemPend(Router_Down_Ack_Request, 0);
 
 
-		while((r = next_packet_down_to_ack()) != NULL){
+		while((r = packet_down_next_to_ack()) != NULL){
 			/* check if this packet is pending a ack */
 			if(r->state == PACKET_SENDING_ACK){
 				break;
@@ -705,7 +705,7 @@ void UNET_Router_Down_Task(void)
 		}
 
 		// Get a packet from the buffer, if is empty there was some error getting here
-		if(get_packet_down(&packet_down) == NO_ENTRY_AVAILABLE) goto wait_again;
+		if(packet_pull_down(&packet_down) == NO_ENTRY_AVAILABLE) goto wait_again;
 
 		// TODO this should be done after inserting in the buffer
 		// Check if it's a duplicated packet

@@ -318,7 +318,7 @@ uint8_t unet_packet_down_send(packet_t *p, uint8_t payload_len)
     if (unet_router_down(p) == TRUE)
     {
     	// Put the packet in the buffer
-    	if(add_packet_down(p) == WRITE_BUFFER_OK){
+    	if(packet_push_down(p) == WRITE_BUFFER_OK){
         	NODESTAT_UPDATE(netapptx);
         	// Por enquanto retornando ok
         	return RESULT_PACKET_SEND_OK;
@@ -367,7 +367,7 @@ uint8_t unet_router_adv(void)
 	if (unet_router_down(&adv_packet) == TRUE)
 	{
 		// Put the packet in the buffer
-		if(add_packet_down(&adv_packet) == WRITE_BUFFER_OK){
+		if(packet_push_down(&adv_packet) == WRITE_BUFFER_OK){
 			return RESULT_PACKET_SEND_OK;
 		}
 		else{
@@ -569,7 +569,7 @@ uint8_t unet_packet_input(packet_t *p)
 				p->state = PACKET_SENDING_ACK;
 
 				// Put the packet in the buffer if there is memory available
-				if(add_packet_down(p) == NO_AVAILABLE_MEMORY){
+				if(packet_push_down(p) == NO_AVAILABLE_MEMORY){
 					printf("NO_AVAILABLE_MEMORY\n");
 					break;
 				}
