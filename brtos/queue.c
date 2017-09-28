@@ -1639,6 +1639,7 @@ uint8_t OSDQueuePost(BRTOS_Queue *pont_event, void *pdata)
 
 #endif
 
+
 #if (BRTOS_GEN_QUEUE_EN == 1)
 
 ////////////////////////////////////////////////////////////
