@@ -168,7 +168,7 @@
  * Configured:
  *    unet buffer: defined by number of packets (NetConfig.h)
  */
-//#define GQUEUE_HEAP_SIZE 0
+#define GQUEUE_HEAP_SIZE 10
 
 //** Enable/Disable printf standard library **//
 //** Must be configured as project specifications**//

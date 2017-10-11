@@ -46,7 +46,7 @@
 *   Revision: 1.60,         Revision: 1.61
 *   Date:     30/11/2010,   Date:     02/12/2010
 *
-*   Authors:  Douglas Fran�a
+*   Authors:  Douglas França
 *   Revision: 1.62
 *   Date:     13/12/2010
 *
@@ -62,6 +62,9 @@
 *   Revision: 1.80		,	Revision: 1.90,		Revision: 2.00
 *   Date:     11/11/2015, 	Date: 12/11/2015, 	Date: 19/05/2015
 *
+*   Authors:  Fabricio Negrisolo de Godoi
+*   Revision: 2.05
+*   Date:     01/10/2017
 *
 *********************************************************************************************************/
 
@@ -103,6 +106,7 @@ uint16_t iStackAddress = 0;                       ///< Virtual stack counter - I
 
 
 uint16_t iQueueAddress = 0;                       ///< Queue heap control
+uint16_t iGQueueAddress = 0;                      ///< Generic Queue heap control
 
 #if (!BRTOS_DYNAMIC_TASKS_ENABLED)
 stack_pointer_t StackAddress;          ///< Virtual stack pointer
@@ -208,6 +212,14 @@ volatile uint8_t flag_load = TRUE;
   OS_QUEUE	       BRTOS_OS_QUEUE_Table[BRTOS_MAX_QUEUE];	// Table of QUEUE control blocks
 #endif
 
+#if (BRTOS_GEN_QUEUE_EN == 1)
+  /// Generic Queue Control Block
+#ifndef BRTOS_MAX_GQUEUE
+#error "Generic queue enabled, but NOT defined BRTOS_MAX_GQUEUE!"
+#endif
+  BRTOS_Queue      BRTOS_GQueue_Table[BRTOS_MAX_GQUEUE];    	// Table of EVENT control blocks
+  OS_GQUEUE	       BRTOS_OS_GQUEUE_Table[BRTOS_MAX_GQUEUE];	// Table of QUEUE control blocks
+#endif
 
 ///// RAM definitions
 #ifdef OS_CPU_TYPE
@@ -225,6 +237,13 @@ volatile uint8_t flag_load = TRUE;
 #else
 	#error("You must define the OS_CPU_TYPE !!!")
 #endif
+
+#if (BRTOS_GEN_QUEUE_EN == 1)
+#ifndef GQUEUE_HEAP_SIZE
+#error "Generic queue is enabled, but heap size NOT defined!"
+#endif
+  unsigned char  GQUEUE_STACK[(GQUEUE_HEAP_SIZE)]; ///< Generic Queue Heap
+#endif ///< (BRTOS_GEN_QUEUE_EN == 1)
 
 #if (PROCESSOR == PIC18)
 #pragma udata ctxram
