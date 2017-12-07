@@ -168,7 +168,7 @@ void unet_benchmark(void){
 	unet_connect(&client);
 
 	// Notify the observer with some information
-	printf("server: brtos unet\n");
+	printf("server: brtos unet %d\n", UNET_DOWN_BUF_SIZE);
 
 
 	// Wait observe response to actually initiate the process
@@ -204,12 +204,19 @@ void unet_benchmark(void){
 #if (BM_CHK_TXRX_TIME_EN == TRUE)
 				tick = (uint32_t) OSGetTickCount() - stick;
 #endif
+
+
 				// Make a individual count for each client
-				if(bm_packet.msg_number > message_table[client.sender_address.u8[7]]){
-					message_table[client.sender_address.u8[7]] = bm_packet.msg_number;
-					bm_pkts_recv[client.sender_address.u8[7]]++;
+				if(strcmp(bm_packet.message,BENCHMARK_MESSAGE) == 0){
+					if(bm_packet.msg_number > message_table[client.sender_address.u8[7]] && bm_packet.msg_number <= bm_num_of_packets){
+	//					printf("From %d Rcv %d, table %d\n",client.sender_address.u8[7], bm_packet.msg_number, message_table[client.sender_address.u8[7]]);
+						message_table[client.sender_address.u8[7]] = bm_packet.msg_number;
+						bm_pkts_recv[client.sender_address.u8[7]]++;
+					}
+	//				bm_pkts_recv[client.sender_address.u8[7]]++;
+					NODESTAT_UPDATE(apprxed);
+//					printf("f %d, n %d\n",client.sender_address.u8[7],bm_packet.msg_number);
 				}
-				NODESTAT_UPDATE(apprxed);
 
 #if (BM_CHK_TXRX_TIME_EN == TRUE)
 				BM_PRINTF("server: delay to receive was %n; msg [%d] %s; from: %d\n",
