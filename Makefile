@@ -47,7 +47,7 @@ LIBRARY3 = /home/user/ti/msp430_gcc/lib/gcc/msp430-elf/5.3.0/include/ssp
 
 
 ############# project configuration ################
-PROJECT_NAME = unet4cooja
+PROJECT_NAME = u4cQueue
 PROJECT_DIR := $(strip $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST)))))
 #$(info $$PROJECT_DIR is [${PROJECT_DIR}]) ## Debug includes
 
