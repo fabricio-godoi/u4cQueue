@@ -15,6 +15,7 @@ unet_transport_t *unet_tp_head=NULL;
 
 extern packet_t packet_up;
 extern packet_t packet_down;
+extern packet_t buffer_down[UNET_DOWN_BUF_SIZE];
 
 void IncludeServerClient(unet_transport_t *p){
         if(unet_tp_tail != NULL){
@@ -177,14 +178,16 @@ int unet_send(unet_transport_t *server_client, uint8_t *buffer, uint8_t length, 
 //		}
 	}
 	else{
-		while((res = unet_packet_down_send(&p, payload_len)) == RESULT_BUFFER_FULL){
+		// Check if the buffer is full
+		while(is_buffer_down_full()){
+//		while((res = unet_packet_down_send(&p, payload_len)) == RESULT_BUFFER_FULL){
 			OSDelayTask(ret_time);
 			ret_cnt++;
 			if (ret_cnt >= ret_limit){
 				break;
 			}
 		}
-		if(res == RESULT_PACKET_SEND_OK){
+		if(unet_packet_down_send(p, payload_len) == RESULT_PACKET_SEND_OK){
 			// Packet in the buffer ready to go
 			extern BRTOS_Sem * Router_Down_Route_Request;
 			OSSemPost(Router_Down_Route_Request);

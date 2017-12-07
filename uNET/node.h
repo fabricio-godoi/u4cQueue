@@ -47,6 +47,7 @@ typedef union
 
 /** node functions */
 uint8_t  node_data_get(node_param_opt_t opt);
+uint16_t node_data_get_16b(node_param_opt_t opt);
 uint8_t  node_data_set(node_param_opt_t opt, uint8_t val);
 void     node_data_init(void);
 uint8_t* node_pan_id64_get(void);

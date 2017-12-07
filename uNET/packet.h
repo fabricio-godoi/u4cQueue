@@ -181,7 +181,7 @@ typedef struct{
 	uint8_t end;		//! End point of the queue
 	uint8_t ack;		//! Index of packets that already ACKed
 }buffer_ctrl_t;
-extern buffer_ctrl_t pdown_ctrl;
+extern volatile buffer_ctrl_t pdown_ctrl;
 
 
 /** buffer functions */
@@ -196,8 +196,10 @@ extern buffer_ctrl_t pdown_ctrl;
 #define is_buffer_down_acked() ((pdown_ctrl.ack == pdown_ctrl.end)?TRUE:FALSE)
 
 
-uint8_t packet_push_down(packet_t *p);
-uint8_t packet_pull_down(packet_t *p);
+uint8_t packet_down_insert(packet_t *p);
+uint8_t packet_down_remove(void);
+uint8_t packet_down_head(packet_t **p);
+//packet_t *packet_pull_down();
 packet_t* packet_down_next_to_ack();
 void packet_clear_buffer_down(void);
 
@@ -205,6 +207,8 @@ void packet_clear_buffer_down(void);
 /** generic packet functions */
 uint8_t  packet_info_set(packet_t *pkt, packet_info_t opt, uint8_t val);
 uint8_t  packet_info_get(packet_t *pkt, packet_info_t opt);
+//uint8_t packet_acquire_down(void);
+//void packet_release_down(void);
 uint8_t  packet_acquire_up(void);
 void     packet_release_up(void);
 packet_state_t  packet_state_down(void);
@@ -213,6 +217,6 @@ void     packet_print(uint8_t *pkt, uint8_t len);
 uint16_t packet_get_source_addr16(packet_t *pkt);
 uint16_t packet_get_dest_addr16(packet_t *pkt);
 
-void packet_print_info(packet_t *p);
+//void packet_print_info(packet_t *p);
 
 #endif /* UNET_PACKET_H_ */

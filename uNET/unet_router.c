@@ -13,7 +13,7 @@
 #include "unet_api.h"
 
 packet_t packet_up;//[UNET_UP_BUF_SIZE];
-packet_t packet_down;
+packet_t *packet_down;
 
 
 /* Packet to advertise the route */
@@ -318,7 +318,7 @@ uint8_t unet_packet_down_send(packet_t *p, uint8_t payload_len)
     if (unet_router_down(p) == TRUE)
     {
     	// Put the packet in the buffer
-    	if(packet_push_down(p) == WRITE_BUFFER_OK){
+    	if(packet_down_insert(p) == WRITE_BUFFER_OK){
         	NODESTAT_UPDATE(netapptx);
         	// Por enquanto retornando ok
         	return RESULT_PACKET_SEND_OK;
@@ -367,7 +367,7 @@ uint8_t unet_router_adv(void)
 	if (unet_router_down(&adv_packet) == TRUE)
 	{
 		// Put the packet in the buffer
-		if(packet_push_down(&adv_packet) == WRITE_BUFFER_OK){
+		if(packet_down_insert(&adv_packet) == WRITE_BUFFER_OK){
 			return RESULT_PACKET_SEND_OK;
 		}
 		else{
@@ -538,6 +538,8 @@ uint8_t unet_packet_input(packet_t *p)
 //			if(packet_acquire_down() == PACKET_ACCESS_DENIED)
 			if(is_buffer_down_full())
 			{
+
+				NODESTAT_UPDATE(overbuf);
 //				printf("BUFFER FULL\n");
 				PRINTF_LINK(1,"BUFFER FULL! RX DROPPED! from: %u, SN: %u\r\n",
 						BYTESTOSHORT(p->info[PKTINFO_SRC16H],p->info[PKTINFO_SRC16L]), p->info[PKTINFO_SEQNUM]);
@@ -545,32 +547,19 @@ uint8_t unet_packet_input(packet_t *p)
 				PRINTF_LINK(2,"RX PACKET STATE: %u\r\n", p->state);
 				PRINTF_LINK(2,"BUFFER PACKET STATE: %u\r\n", r->state);
 
-				NODESTAT_UPDATE(overbuf);
 				ack_req = ACK_REQ_FALSE;
 			}
 			else
 			{
-
-				// NOTE:  will be duplicated packets that will arrive
-				//        since not always the buffer should be free
-				// TODO:  so, instead check in 802154 check it after inserting in buffer
-				// Check if the packet is duplicated
-//				if(p->info[PKTINFO_DUPLICATED] == TRUE)
-//				{
-//					printf("DUP %d\n",p->info[PKTINFO_SEQNUM]);
-//					NODESTAT_UPDATE(dupnet);
-//					PRINTF_ROUTER(1,"DROP DUP PACKET, to %u SN %u \r\n",
-//										BYTESTOSHORT(p->info[PKTINFO_DEST16H],p->info[PKTINFO_DEST16L]),p->info[PKTINFO_SEQNUM]);
-//					// There is no need to continue, drop the packet
-//					break;
-//				}
-
 				/* it will be stored in buffer, change state to sending ack */
 				p->state = PACKET_SENDING_ACK;
 
 				// Put the packet in the buffer if there is memory available
-				if(packet_push_down(p) == NO_AVAILABLE_MEMORY){
+				if(packet_down_insert(p) == NO_AVAILABLE_MEMORY){
+					// It's possible to get here if some priority task
+					// put some data in the buffer before reaching here
 					printf("NO_AVAILABLE_MEMORY\n");
+					NODESTAT_UPDATE(overbuf);
 					break;
 				}
 
@@ -638,7 +627,7 @@ uint8_t unet_packet_input(packet_t *p)
 			  * NO: discards -> return NO_ACK -> end
 			  */
 //			extern packet_t packet_down;
-			r=&packet_down;
+			r=packet_down;
 			PRINTF_ROUTER(1,"RX ACK DOWN, from %u, SN %d, ACK SN: %d\r\n",
 					BYTESTOSHORT(r->info[PKTINFO_DEST16H],r->info[PKTINFO_DEST16L]),
 					r->info[PKTINFO_SEQNUM], p->info[PKTINFO_SEQNUM]);
@@ -652,7 +641,6 @@ uint8_t unet_packet_input(packet_t *p)
 						(p->info[PKTINFO_SRC16L] == r->info[PKTINFO_DEST16L]))
 				{
 					r->state = PACKET_ACKED;
-
 					/* post a "ack down" event */
 					extern BRTOS_Sem* Router_Down_Ack_Received;
 					OSSemPost(Router_Down_Ack_Received);

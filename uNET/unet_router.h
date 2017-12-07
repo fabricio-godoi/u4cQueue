@@ -57,5 +57,6 @@ void     unet_router_up_table_entry_add(uint16_t next_hop, addr64_t *dest64);
 uint16_t unet_router_up_table_entry_get(uint16_t idx);
 void 	 unet_router_up_table_clear(void);
 uint8_t  unet_router_up(void);
+void 	 unet_adv_packet_create(void);
 
 #endif /* UNET_ROUTER_H_ */
