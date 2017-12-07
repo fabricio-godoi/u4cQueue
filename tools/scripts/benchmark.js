@@ -1,30 +1,34 @@
 // 
 // \brief  Log mote statistics in csv file
 // \author Fabrício Negrisolo de Godoi
-// \date   06-04-2017
-// /// TODO UPDATE THIS INFO
+// \date   2017-10-18
 // \details
 //   This script is performed in 4 steps:
-// 1st - Definition of used variables and function, in which:
-//       - motes_statistcs is the variable that store all motes statistics,
-//         "header" variable must be the same type of this structure;
+// 1st - Definition of used variables and motes_statistics function, in which:
+//       - motes_statistics is the variable that store all motes statistics,
+//         "header" variable must have the same structure of motes_statistics;
 //       - server_collection is a server variable informing the packets
 //         received by each client;
 //       - "header" must contains the exact format of the statistics
 //         variable in the mote write in .csv;
-//       - server information must got from server mote from UART in 
-//         this exact format: "server: os_name longest_path"
+//       - server information is got from UART parsing server messages in 
+//         this exact format: "server: os_name network_type"
 // 2nd - Simulation initialization (UART):
 //       - Get server information and inform each mote the network size
 // 3rd - Simulation running (UART):
 //       - Wait the network stabilization time ...
-//           ... Each client has a path to server + delay time (10s)
+//           ... Each client has a path to server + delay time (eg. 10s)
 //       - Start all motes (clean statistics and start the processes) ...
-//           ... wait run time defined by sim_time;
-//       - After sim_time, stop all motes (statistcs and processes)
+//       - Wait each mote send "BMCD_DONE" after sending the number of packets
+//         setup in bm_packets variable;
+//       - After all motes sent "BMCD_DONE", stop all motes (statistcs and processes);
+//       - Wait buffering clear time "buffer_clean_delay";
 // 4th - Results collections (RAM):
 //       - Read the motes memory collecting the statistics specified by
 //         header directly from the memory;
+// 5th - Run next simulation with new transmission rate:
+//       - New transmission rate is calc by: "bm_interval-bm_interval_dec"
+//       - Runs end when bm_interval is less than bm_min_interval;
 //
 // Obs.:
 //  Serial at: cooja.interfaces.SerialPort.java
@@ -44,7 +48,8 @@ var server_id = id;
 var server_mote = mote;
 var string = msg.replace("server: ","").split(" ");
 var os_name = string[0];
-var os_net = string[1]; //bm_nofmsgs = string[2];
+var os_net = string[1];
+var buffer_size = string[2];
 
 // This is used to create the output log
 var sim_title = sim.getTitle();
@@ -57,7 +62,7 @@ var motes = sim.getMotes();
 var bm_network_settle_time = 15000; // default: 15s
 
 // This delay is intended to clear the network buffer (hop/hop)
-var buffer_clean_delay = 10000; // wait ten seconds to ensure that the buffer is clear
+var buffer_clean_delay = 15000; // wait ten seconds to ensure that the buffer is clear
 
 // This delay is used to ensure that the previous simulation run has ended
 var delay_between_runs = 2000; // wait two seconds to run another simulation
@@ -66,7 +71,7 @@ var delay_between_runs = 2000; // wait two seconds to run another simulation
 var bm_packets = 100;	// value should not exceed 127
 
 // Transmission start interval in ms
-var bm_interval = 10000; //default
+var bm_interval = 4500; //default
 
 //Transmission interval decrease value rate is ms
 var bm_interval_dec = 500;
@@ -81,7 +86,7 @@ var server_collection = "bm_pkts_recv";
 //Caculate total simulation time
 var total_simulation_time = 0;
 for(var k = bm_interval; k >= bm_min_interval; k-=bm_interval_dec){
-	total_simulation_time += bm_interval*bm_packets + buffer_clean_delay + delay_between_runs;
+	total_simulation_time += k*bm_packets + buffer_clean_delay + delay_between_runs;
 }
 
 // Print simulation parameters
@@ -90,6 +95,7 @@ log.log("Simulation Parameters\n");
 log.log("Server ID: "+server_id+"\n");
 log.log("Server OS: "+os_name+"\n");
 log.log("OS Network: "+os_net+"\n");
+log.log("Buffer Size: "+buffer_size+"\n");
 log.log("Packts/mote: "+bm_packets+"\n");
 log.log("Transmission interval: "+bm_interval+"ms\n");
 log.log("Total simulation time expected: "+ms2time(total_simulation_time)+"\n");
@@ -389,7 +395,7 @@ for(var k = 0; k < motes.length; k++){
 log.log("Retrieving data from motes ["+motes.length+"] ...\n");
 
 //Create output folder
-var output_folder = log_path+"/"+os_name+"/"+os_net+"_"+sim_title+"_"+today;
+var output_folder = log_path+"/"+os_name+"_q"+buffer_size+"/"+os_net+"_"+sim_title+"_"+today;
 if(!new File(output_folder).exists())  new File(output_folder).mkdirs();
 
 // Create file
@@ -439,6 +445,7 @@ output.write("Simulation total time;"+tick2time(time - sim_started)+"\n");
 output.write("Number of motes;"+motes.length+"\n");
 output.write("Network interval;"+bm_interval+"\n");
 output.write("Packets/mote;"+bm_packets+"\n");
+output.write("Buffer size;"+buffer_size+"\n");
 output.write("Network;"+os_net+"\n");
 output.write("OS;"+os_name+"\n");
 output.write("Success rate;=100*B"+(motes.length+2)+"/C"+(motes.length+2)+"\n");
